@@ -40,20 +40,101 @@ class MappingConfig:
 
 
 @dataclass
+class ButtonAction:
+    """An action bound to a pen or pad button.
+
+    ``kind`` is ``"button"`` (mouse button ``value``), ``"key"`` (a keystroke combo such as
+    ``"ctrl z"``), or ``"disabled"``. Serialises to the xsetwacom action string.
+    """
+
+    kind: str = "button"  # button | key | disabled
+    value: str = ""
+
+    def to_xsetwacom(self) -> str:
+        if self.kind == "disabled" or not self.value.strip():
+            return "0" if self.kind == "disabled" else self.value
+        if self.kind == "key":
+            return f"key {self.value.strip()}"
+        return f"button {self.value.strip()}"
+
+
+def _action(kind: str, value: str) -> ButtonAction:
+    return ButtonAction(kind=kind, value=value)
+
+
+@dataclass
+class PenConfig:
+    """Pen feel + button mapping (applied to the stylus / eraser)."""
+
+    pressure_curve: list[int] = field(default_factory=lambda: [0, 0, 100, 100])
+    threshold: int = 27  # tip pressure threshold
+    button1: ButtonAction = field(default_factory=lambda: _action("button", "1"))
+    button2: ButtonAction = field(default_factory=lambda: _action("button", "2"))
+    button3: ButtonAction = field(default_factory=lambda: _action("button", "3"))
+
+
+@dataclass
+class TouchConfig:
+    """Finger-touch behaviour (applied to the touch device)."""
+
+    enabled: bool = True
+    gestures: bool = True
+    scroll_distance: int = 20
+    zoom_distance: int = 50
+    tap_time: int = 250
+
+
+@dataclass
+class PadConfig:
+    """ExpressKey button mapping (applied to the pad device).
+
+    ``buttons`` maps an xsetwacom pad button number (as a string key, for JSON friendliness)
+    to its :class:`ButtonAction`.
+    """
+
+    buttons: dict[str, ButtonAction] = field(default_factory=dict)
+
+
+def _button_action_from(data: object) -> ButtonAction:
+    return ButtonAction(**data) if isinstance(data, dict) else ButtonAction()
+
+
+@dataclass
 class Profile:
     """A named collection of tablet settings."""
 
     name: str
     mapping: MappingConfig = field(default_factory=MappingConfig)
+    pen: PenConfig = field(default_factory=PenConfig)
+    touch: TouchConfig = field(default_factory=TouchConfig)
+    pad: PadConfig = field(default_factory=PadConfig)
 
     # ---- serialisation ----------------------------------------------------
     def to_dict(self) -> dict:
-        return {"name": self.name, "mapping": asdict(self.mapping)}
+        return {
+            "name": self.name,
+            "mapping": asdict(self.mapping),
+            "pen": asdict(self.pen),
+            "touch": asdict(self.touch),
+            "pad": asdict(self.pad),
+        }
 
     @classmethod
     def from_dict(cls, data: dict) -> Profile:
         mapping = MappingConfig(**(data.get("mapping") or {}))
-        return cls(name=data["name"], mapping=mapping)
+
+        pen_data = dict(data.get("pen") or {})
+        for key in ("button1", "button2", "button3"):
+            if key in pen_data:
+                pen_data[key] = _button_action_from(pen_data[key])
+        pen = PenConfig(**pen_data)
+
+        touch = TouchConfig(**(data.get("touch") or {}))
+
+        pad_buttons = (data.get("pad") or {}).get("buttons") or {}
+        pad = PadConfig(buttons={k: _button_action_from(v) for k, v in pad_buttons.items()})
+
+        return cls(name=data["name"], mapping=mapping, pen=pen, touch=touch, pad=pad)
 
     def save(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)

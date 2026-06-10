@@ -12,7 +12,7 @@ from collections.abc import Callable
 
 from ..backend import devices, displays
 from ..backend.xsetwacom import XsetwacomError
-from .engine import apply_mapping
+from .engine import apply_profile
 from .store import ProfileStore
 
 # Settle delay: a tablet exposes several sub-devices in quick succession on plug-in.
@@ -30,7 +30,7 @@ def apply_active(store: ProfileStore | None = None) -> bool:
     if not tablets:
         return False
     try:
-        apply_mapping(profile.mapping, tablets[0], displays.list_outputs(), dry_run=False)
+        apply_profile(profile, tablets[0], displays.list_outputs(), dry_run=False)
     except XsetwacomError:
         return False
     return True

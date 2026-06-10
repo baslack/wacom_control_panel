@@ -10,7 +10,7 @@ from ..backend import xsetwacom
 from ..backend.devices import Tablet
 from ..backend.displays import Output, desktop_bounds
 from .mapping import Area, forced_area
-from .profile import MappingConfig
+from .profile import MappingConfig, PadConfig, PenConfig, Profile, TouchConfig
 
 # Fallback if the device can't be probed (no stylus / xsetwacom unavailable).
 _DEFAULT_TABLET_AREA = (44704, 27940)
@@ -123,6 +123,58 @@ def mapping_commands(
     return commands
 
 
+def pen_commands(pen: PenConfig, tablet: Tablet) -> list[list[str]]:
+    """Pressure curve, tip threshold and button mapping (stylus + eraser)."""
+    commands: list[list[str]] = []
+    feel_targets = tablet.by_type("STYLUS", "ERASER")
+    for dev in feel_targets:
+        commands.append(
+            xsetwacom.build_set_command(dev.name, "PressureCurve", *pen.pressure_curve)
+        )
+        commands.append(xsetwacom.build_set_command(dev.name, "Threshold", pen.threshold))
+    stylus = tablet.stylus
+    if stylus is not None:
+        for num, action in ((1, pen.button1), (2, pen.button2), (3, pen.button3)):
+            commands.append(
+                xsetwacom.build_set_command(stylus.name, "Button", num, action.to_xsetwacom())
+            )
+    return commands
+
+
+def touch_commands(touch: TouchConfig, tablet: Tablet) -> list[list[str]]:
+    """Touch on/off, gestures and scroll/zoom/tap tuning (touch device)."""
+    dev = tablet.touch
+    if dev is None:
+        return []
+    return [
+        xsetwacom.build_set_command(dev.name, "Touch", "on" if touch.enabled else "off"),
+        xsetwacom.build_set_command(dev.name, "Gesture", "on" if touch.gestures else "off"),
+        xsetwacom.build_set_command(dev.name, "ScrollDistance", touch.scroll_distance),
+        xsetwacom.build_set_command(dev.name, "ZoomDistance", touch.zoom_distance),
+        xsetwacom.build_set_command(dev.name, "TapTime", touch.tap_time),
+    ]
+
+
+def pad_commands(pad: PadConfig, tablet: Tablet) -> list[list[str]]:
+    """ExpressKey button mapping (pad device)."""
+    dev = tablet.pad
+    if dev is None:
+        return []
+    commands: list[list[str]] = []
+    for num, action in sorted(pad.buttons.items(), key=lambda kv: int(kv[0])):
+        commands.append(
+            xsetwacom.build_set_command(dev.name, "Button", num, action.to_xsetwacom())
+        )
+    return commands
+
+
+def _run_commands(commands: list[list[str]], *, dry_run: bool) -> list[list[str]]:
+    if not dry_run:
+        for cmd in commands:
+            xsetwacom.set_param(cmd[2], cmd[3], *cmd[4:], dry=False)
+    return commands
+
+
 def apply_mapping(
     mapping: MappingConfig,
     tablet: Tablet,
@@ -131,8 +183,23 @@ def apply_mapping(
     dry_run: bool = False,
 ) -> list[list[str]]:
     """Apply (or, if ``dry_run``, just return) the mapping commands."""
-    commands = mapping_commands(mapping, tablet, outputs)
-    if not dry_run:
-        for cmd in commands:
-            xsetwacom.set_param(cmd[2], cmd[3], *cmd[4:], dry=False)
-    return commands
+    return _run_commands(mapping_commands(mapping, tablet, outputs), dry_run=dry_run)
+
+
+def profile_commands(
+    profile: Profile, tablet: Tablet, outputs: list[Output]
+) -> list[list[str]]:
+    """All xsetwacom commands for a full profile: mapping + pen + touch + pad."""
+    return (
+        mapping_commands(profile.mapping, tablet, outputs)
+        + pen_commands(profile.pen, tablet)
+        + touch_commands(profile.touch, tablet)
+        + pad_commands(profile.pad, tablet)
+    )
+
+
+def apply_profile(
+    profile: Profile, tablet: Tablet, outputs: list[Output], *, dry_run: bool = False
+) -> list[list[str]]:
+    """Apply (or return) every setting in a profile."""
+    return _run_commands(profile_commands(profile, tablet, outputs), dry_run=dry_run)

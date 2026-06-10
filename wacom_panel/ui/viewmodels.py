@@ -10,10 +10,17 @@ from __future__ import annotations
 from PySide6.QtCore import Property, QObject, Signal, Slot
 
 from ..backend import devices, displays, xsetwacom
-from ..core.engine import apply_mapping, resolve_area, tablet_native_area
+from ..core.engine import apply_profile, resolve_area, tablet_native_area
 from ..core.mapping import ANCHORS, ROTATIONS, Area
 from ..core.persistence import Persistence
-from ..core.profile import MappingConfig, Profile
+from ..core.profile import (
+    ButtonAction,
+    MappingConfig,
+    PadConfig,
+    PenConfig,
+    Profile,
+    TouchConfig,
+)
 from ..core.store import ProfileStore
 
 _WHOLE_DESKTOP = "Whole desktop"
@@ -219,6 +226,120 @@ class MappingVM(QObject):
     applyToTouch = Property(bool, _get_touch, _set_touch, notify=changed)
 
 
+class PenVM(QObject):
+    """Editable view of :class:`PenConfig` (pressure curve, threshold, pen buttons)."""
+
+    changed = Signal()
+
+    def __init__(self, parent: QObject | None = None) -> None:
+        super().__init__(parent)
+        self._p = PenConfig()
+
+    def load(self, pen: PenConfig) -> None:
+        self._p = pen
+        self.changed.emit()
+
+    def to_config(self) -> PenConfig:
+        return self._p
+
+    def _curve_get(idx):  # noqa: N805
+        return lambda self: self._p.pressure_curve[idx]
+
+    def _curve_set(idx):  # noqa: N805
+        def setter(self, v):
+            v = max(0, min(100, int(v)))
+            if self._p.pressure_curve[idx] != v:
+                self._p.pressure_curve[idx] = v
+                self.changed.emit()
+        return setter
+
+    p1x = Property(int, _curve_get(0), _curve_set(0), notify=changed)
+    p1y = Property(int, _curve_get(1), _curve_set(1), notify=changed)
+    p2x = Property(int, _curve_get(2), _curve_set(2), notify=changed)
+    p2y = Property(int, _curve_get(3), _curve_set(3), notify=changed)
+
+    def _get_threshold(self) -> int:
+        return self._p.threshold
+
+    def _set_threshold(self, v: int) -> None:
+        v = max(0, min(2047, int(v)))
+        if self._p.threshold != v:
+            self._p.threshold = v
+            self.changed.emit()
+
+    threshold = Property(int, _get_threshold, _set_threshold, notify=changed)
+
+    def _kind(num):  # noqa: N805
+        return lambda self: getattr(self._p, f"button{num}").kind
+
+    def _value(num):  # noqa: N805
+        return lambda self: getattr(self._p, f"button{num}").value
+
+    button1Kind = Property(str, _kind(1), notify=changed)
+    button1Value = Property(str, _value(1), notify=changed)
+    button2Kind = Property(str, _kind(2), notify=changed)
+    button2Value = Property(str, _value(2), notify=changed)
+    button3Kind = Property(str, _kind(3), notify=changed)
+    button3Value = Property(str, _value(3), notify=changed)
+
+    @Slot(int, str, str)
+    def setButton(self, num: int, kind: str, value: str) -> None:
+        if num in (1, 2, 3):
+            setattr(self._p, f"button{num}", ButtonAction(kind=kind, value=value))
+            self.changed.emit()
+
+
+class TouchVM(QObject):
+    """Editable view of :class:`TouchConfig`."""
+
+    changed = Signal()
+
+    def __init__(self, parent: QObject | None = None) -> None:
+        super().__init__(parent)
+        self._t = TouchConfig()
+
+    def load(self, touch: TouchConfig) -> None:
+        self._t = touch
+        self.changed.emit()
+
+    def to_config(self) -> TouchConfig:
+        return self._t
+
+    def _bool_prop(attr):  # noqa: N805
+        def getter(self):
+            return getattr(self._t, attr)
+
+        def setter(self, v):
+            if getattr(self._t, attr) != bool(v):
+                setattr(self._t, attr, bool(v))
+                self.changed.emit()
+
+        return getter, setter
+
+    def _int_prop(attr, lo, hi):  # noqa: N805
+        def getter(self):
+            return getattr(self._t, attr)
+
+        def setter(self, v):
+            v = max(lo, min(hi, int(v)))
+            if getattr(self._t, attr) != v:
+                setattr(self._t, attr, v)
+                self.changed.emit()
+
+        return getter, setter
+
+    _en_g, _en_s = _bool_prop("enabled")
+    enabled = Property(bool, _en_g, _en_s, notify=changed)
+    _ge_g, _ge_s = _bool_prop("gestures")
+    gestures = Property(bool, _ge_g, _ge_s, notify=changed)
+    _sd_g, _sd_s = _int_prop("scroll_distance", 1, 500)
+    scrollDistance = Property(int, _sd_g, _sd_s, notify=changed)
+    _zd_g, _zd_s = _int_prop("zoom_distance", 1, 500)
+    zoomDistance = Property(int, _zd_g, _zd_s, notify=changed)
+    _tt_g, _tt_s = _int_prop("tap_time", 0, 1000)
+    tapTime = Property(int, _tt_g, _tt_s, notify=changed)
+
+
 class Controller(QObject):
     """Top-level object exposed to QML: profiles, actions, persistence + the mapping VM."""
 
@@ -235,9 +356,14 @@ class Controller(QObject):
         self._outputs = displays.list_outputs()
         self._mapping = MappingVM(self)
         self._mapping.set_context(self._tablet, self._outputs)
+        self._pen = PenVM(self)
+        self._touch = TouchVM(self)
+        self._pad = PadConfig()
         self._load_active()
 
     mapping = Property(QObject, lambda self: self._mapping, constant=True)
+    pen = Property(QObject, lambda self: self._pen, constant=True)
+    touch = Property(QObject, lambda self: self._touch, constant=True)
     tabletName = Property(
         str, lambda self: self._tablet.name if self._tablet else "(no tablet detected)",
         constant=True,
@@ -251,9 +377,24 @@ class Controller(QObject):
                                 notify=persistChanged)
 
     # ---- profiles --------------------------------------------------------
+    def _load_profile(self, profile: Profile) -> None:
+        self._mapping.load(profile.mapping)
+        self._pen.load(profile.pen)
+        self._touch.load(profile.touch)
+        self._pad = profile.pad
+
+    def _current_profile(self) -> Profile:
+        name = self._store.get_active() or "Default"
+        return Profile(
+            name=name,
+            mapping=self._mapping.to_mapping(),
+            pen=self._pen.to_config(),
+            touch=self._touch.to_config(),
+            pad=self._pad,
+        )
+
     def _load_active(self) -> None:
-        active = self._store.ensure_default()
-        self._mapping.load(active.mapping)
+        self._load_profile(self._store.ensure_default())
         self.profilesChanged.emit()
 
     @Slot(str)
@@ -263,7 +404,7 @@ class Controller(QObject):
         self._store.set_active(name)
         profile = self._store.load(name)
         if profile is not None:
-            self._mapping.load(profile.mapping)
+            self._load_profile(profile)
             self.profilesChanged.emit()
             self.statusMessage.emit(f"Switched to “{name}”.")
 
@@ -314,16 +455,15 @@ class Controller(QObject):
             self.statusMessage.emit("No Wacom tablet detected.")
             return
         try:
-            apply_mapping(self._mapping.to_mapping(), self._tablet, self._outputs, dry_run=False)
+            apply_profile(self._current_profile(), self._tablet, self._outputs, dry_run=False)
         except xsetwacom.XsetwacomError as exc:
             self.statusMessage.emit(f"Apply failed: {exc}")
             return
-        self.statusMessage.emit("Applied mapping to tablet.")
+        self.statusMessage.emit("Applied settings to tablet.")
 
     @Slot()
     def save(self) -> None:
-        profile = self._store.active_profile() or self._store.ensure_default()
-        profile.mapping = self._mapping.to_mapping()
+        profile = self._current_profile()
         self._store.save(profile)
         self.statusMessage.emit(f"Saved “{profile.name}”.")
 
@@ -331,7 +471,7 @@ class Controller(QObject):
     def revert(self) -> None:
         profile = self._store.active_profile()
         if profile is not None:
-            self._mapping.load(profile.mapping)
+            self._load_profile(profile)
             self.statusMessage.emit(f"Reverted to saved “{profile.name}”.")
 
     # ---- persistence -----------------------------------------------------
