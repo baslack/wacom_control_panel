@@ -5,14 +5,18 @@ import QtQuick.Layouts
 
 ApplicationWindow {
     id: win
-    width: 1040
-    height: 700
+    width: 1120
+    height: 780
+    minimumWidth: 940
+    minimumHeight: 600
     visible: true
     title: "Wacom Control Panel"
 
     Material.theme: Material.Dark
     Material.accent: Material.Blue
-    Material.primary: Material.BlueGrey
+
+    readonly property color barColor: "#2a2a2e"
+    readonly property color barText: "#e6e6e6"
 
     property string status: controller.tabletName
 
@@ -23,13 +27,14 @@ ApplicationWindow {
 
     // ---- profile bar -----------------------------------------------------
     header: ToolBar {
+        background: Rectangle { color: win.barColor }
         RowLayout {
             anchors.fill: parent
             anchors.leftMargin: 10
             anchors.rightMargin: 10
             spacing: 8
 
-            Label { text: "Profile:" }
+            Label { text: "Profile:"; color: win.barText }
             ComboBox {
                 id: profileCombo
                 Layout.minimumWidth: 200
@@ -44,7 +49,7 @@ ApplicationWindow {
                                                                  controller.activeProfile) }
             Button { text: "Delete"; onClicked: deleteDialog.open() }
             Item { Layout.fillWidth: true }
-            Label { text: controller.tabletName; color: "#9aa"; font.pixelSize: 12 }
+            Label { text: controller.tabletName; color: "#aab2bb"; font.pixelSize: 12 }
         }
     }
 
@@ -75,10 +80,18 @@ ApplicationWindow {
 
         // ---- controls ----------------------------------------------------
         Frame {
-            Layout.preferredWidth: 320
+            Layout.preferredWidth: 340
             Layout.fillHeight: true
-            ColumnLayout {
+            padding: 6
+
+            ScrollView {
+                id: controlsScroll
                 anchors.fill: parent
+                contentWidth: availableWidth
+                clip: true
+
+            ColumnLayout {
+                width: controlsScroll.availableWidth
                 spacing: 8
 
                 GridLayout {
@@ -191,11 +204,13 @@ ApplicationWindow {
                     Button { text: "Save"; onClicked: controller.save() }
                 }
             }
+            }
         }
     }
 
     // ---- footer ----------------------------------------------------------
     footer: ToolBar {
+        background: Rectangle { color: win.barColor }
         RowLayout {
             anchors.fill: parent
             anchors.leftMargin: 10
@@ -206,7 +221,7 @@ ApplicationWindow {
                 onToggled: controller.setPersist(checked)
             }
             Item { Layout.fillWidth: true }
-            Label { text: win.status; color: "#9aa" }
+            Label { text: win.status; color: win.barText }
         }
     }
 

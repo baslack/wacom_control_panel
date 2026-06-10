@@ -12,33 +12,51 @@ from ..backend.displays import Output, desktop_bounds
 from .mapping import Area, forced_area
 from .profile import MappingConfig
 
-# Native tablet area is queried lazily; this is only a fallback if the query fails.
+# Fallback if the device can't be probed (no stylus / xsetwacom unavailable).
 _DEFAULT_TABLET_AREA = (44704, 27940)
+
+# Per-device cache of the true native size, so we probe at most once per process.
+_NATIVE_CACHE: dict[str, tuple[int, int]] = {}
+
+
+def _parse_area(raw: str) -> tuple[int, int, int, int] | None:
+    parts = raw.split()
+    if len(parts) != 4:
+        return None
+    try:
+        x1, y1, x2, y2 = (int(p) for p in parts)
+    except ValueError:
+        return None
+    return x1, y1, x2, y2
 
 
 def tablet_native_area(tablet: Tablet) -> tuple[int, int]:
-    """Native (full) tablet dimensions in device units, via ResetArea round-trip-free query.
+    """Native (full) tablet dimensions in device units.
 
-    We read the stylus' default Area. We deliberately do not mutate the device: the current
-    Area may already be cropped, so we ask for the full extent by reading ``Area`` after a
-    ``ResetArea`` would be destructive — instead we rely on the documented native maximum and
-    fall back to a sane default if the stylus is unavailable.
+    The current ``Area`` may already be cropped (by us, or by a reapplied profile), so reading
+    it would shrink the tablet cumulatively on each apply. Instead we probe the true extent via
+    ``ResetArea``, then restore the previous Area, and cache the result for the process.
     """
     stylus = tablet.stylus
     if stylus is None:
         return _DEFAULT_TABLET_AREA
+    if stylus.name in _NATIVE_CACHE:
+        return _NATIVE_CACHE[stylus.name]
     try:
-        # Querying the stored max via the driver: read current, but the safest portable read
-        # of native size is the device's reported Area after the driver initialises it.
-        raw = xsetwacom.get(stylus.name, "Area")
-        parts = [int(p) for p in raw.split()]
-        if len(parts) == 4:
-            w, h = parts[2] - parts[0], parts[3] - parts[1]
-            if w > 0 and h > 0:
-                return w, h
-    except (xsetwacom.XsetwacomError, ValueError):
-        pass
-    return _DEFAULT_TABLET_AREA
+        previous = _parse_area(xsetwacom.get(stylus.name, "Area"))
+        xsetwacom.reset_area(stylus.name, dry=False)
+        native = _parse_area(xsetwacom.get(stylus.name, "Area"))
+        if previous is not None:  # restore the user's current area (non-destructive probe)
+            xsetwacom.set_param(stylus.name, "Area", *previous, dry=False)
+    except xsetwacom.XsetwacomError:
+        return _DEFAULT_TABLET_AREA
+    if native is None:
+        return _DEFAULT_TABLET_AREA
+    w, h = native[2] - native[0], native[3] - native[1]
+    if w <= 0 or h <= 0:
+        return _DEFAULT_TABLET_AREA
+    _NATIVE_CACHE[stylus.name] = (w, h)
+    return (w, h)
 
 
 def resolve_maptooutput(mapping: MappingConfig, outputs: list[Output]) -> str:

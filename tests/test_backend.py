@@ -98,6 +98,38 @@ def test_mapping_commands_cover_pen_tools_only_by_default():
     assert params == ["Mode", "Rotate", "Area", "MapToOutput"]
 
 
+def test_native_area_probes_via_resetarea_not_current(monkeypatch):
+    """Native size must come from a ResetArea probe, not the (possibly cropped) current Area."""
+    from wacom_panel.core import engine
+
+    engine._NATIVE_CACHE.clear()
+    calls = []
+    state = {"area": "11176 0 33528 12573"}  # a cropped current area
+
+    def fake_get(name, param, *extra):
+        return state["area"]
+
+    def fake_reset(name, *, dry=None):
+        state["area"] = "0 0 44704 27940"  # ResetArea exposes the true native extent
+        calls.append("reset")
+        return []
+
+    def fake_set(name, param, *values, dry=None):
+        if param == "Area":
+            state["area"] = " ".join(str(v) for v in values)
+        return []
+
+    monkeypatch.setattr(engine.xsetwacom, "get", fake_get)
+    monkeypatch.setattr(engine.xsetwacom, "reset_area", fake_reset)
+    monkeypatch.setattr(engine.xsetwacom, "set_param", fake_set)
+
+    tablet = group_tablets(parse_devices(LIST_DEVICES))[0]
+    assert engine.tablet_native_area(tablet) == (44704, 27940)
+    assert "reset" in calls
+    # The probe restores the previous (cropped) area afterward.
+    assert state["area"] == "11176 0 33528 12573"
+
+
 def test_force_proportions_whole_desktop_uses_combined_aspect():
     tablet = group_tablets(parse_devices(LIST_DEVICES))[0]
     outs = parse_listmonitors(LIST_MONITORS)  # 3840x1080 combined -> aspect 3.556
