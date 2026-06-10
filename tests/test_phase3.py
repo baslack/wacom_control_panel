@@ -30,9 +30,13 @@ def _tablet():
 
 
 def test_button_action_to_xsetwacom():
-    assert ButtonAction("button", "3").to_xsetwacom() == "button 3"
+    # Mouse buttons must use the held "+N" form so click-and-drag works (a bare "N"
+    # expands to "+N -N", an instant click that cannot hold).
+    assert ButtonAction("button", "3").to_xsetwacom() == "button +3"
+    assert ButtonAction("button", "1").to_xsetwacom() == "button +1"
     assert ButtonAction("key", "ctrl z").to_xsetwacom() == "key ctrl z"
     assert ButtonAction("disabled", "").to_xsetwacom() == "0"
+    assert ButtonAction("button", "").to_xsetwacom() == "0"  # empty -> disabled
 
 
 def test_profile_roundtrip_with_all_sections(tmp_path):

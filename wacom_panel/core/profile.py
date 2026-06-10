@@ -51,11 +51,17 @@ class ButtonAction:
     value: str = ""
 
     def to_xsetwacom(self) -> str:
-        if self.kind == "disabled" or not self.value.strip():
-            return "0" if self.kind == "disabled" else self.value
+        if self.kind == "disabled":
+            return "0"
+        value = self.value.strip()
+        if not value:
+            return "0"
         if self.kind == "key":
-            return f"key {self.value.strip()}"
-        return f"button {self.value.strip()}"
+            return f"key {value}"
+        # "+N" = press-and-hold (the driver releases on physical release), matching the
+        # device defaults. A bare "N" expands to "+N -N" (an instant click) and breaks
+        # click-and-drag — so always emit the held form.
+        return f"button +{value}"
 
 
 def _action(kind: str, value: str) -> ButtonAction:
