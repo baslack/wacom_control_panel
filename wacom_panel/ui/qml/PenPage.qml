@@ -1,9 +1,21 @@
-// Pen: pressure response, tip threshold, and pen-button actions.
+// Pen: pressure response (+ named presets), tip click pressure, and pen-button actions.
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
 Item {
+    id: page
+
+    // Describe the tip pressure threshold (how hard you must press to register a click).
+    function thresholdWord(v) {
+        if (v <= 15) return "Feather"
+        if (v <= 50) return "Very light"
+        if (v <= 150) return "Light"
+        if (v <= 400) return "Medium"
+        if (v <= 900) return "Firm"
+        return "Very firm"
+    }
+
     ScrollView {
         id: scroll
         anchors.fill: parent
@@ -22,9 +34,12 @@ Item {
                 ColumnLayout {
                     anchors.fill: parent
                     spacing: 8
+
                     PressureCurve {
-                        Layout.preferredWidth: 320
-                        Layout.preferredHeight: 260
+                        // Always square; scales down on narrow windows.
+                        property int side: Math.min(scroll.availableWidth - 60, 360)
+                        Layout.preferredWidth: side
+                        Layout.preferredHeight: side
                         Layout.alignment: Qt.AlignHCenter
                     }
                     Label {
@@ -33,42 +48,59 @@ Item {
                         font.pixelSize: 12
                     }
                     RowLayout {
+                        Layout.fillWidth: true
                         spacing: 8
-                        Label { text: "Presets:" }
-                        Button {
-                            text: "Soft"
-                            onClicked: { controller.pen.p1x = 0; controller.pen.p1y = 30;
-                                         controller.pen.p2x = 70; controller.pen.p2y = 100 }
+                        Label { text: "Preset:" }
+                        ComboBox {
+                            id: presetCombo
+                            Layout.fillWidth: true
+                            model: controller.pen.presetNames
+                            onActivated: controller.pen.applyPreset(currentText)
                         }
                         Button {
-                            text: "Linear"
-                            onClicked: { controller.pen.p1x = 0; controller.pen.p1y = 0;
-                                         controller.pen.p2x = 100; controller.pen.p2y = 100 }
+                            text: "Save…"
+                            onClicked: { presetName.text = ""; presetDialog.open() }
                         }
                         Button {
-                            text: "Firm"
-                            onClicked: { controller.pen.p1x = 30; controller.pen.p1y = 0;
-                                         controller.pen.p2x = 100; controller.pen.p2y = 70 }
+                            text: "Delete"
+                            enabled: controller.pen.canDeletePreset(presetCombo.currentText)
+                            onClicked: controller.pen.deletePreset(presetCombo.currentText)
                         }
                     }
                 }
             }
 
             GroupBox {
-                title: "Tip feel"
+                title: "Tip click pressure"
                 Layout.fillWidth: true
-                RowLayout {
+                ColumnLayout {
                     anchors.fill: parent
-                    spacing: 8
-                    Label { text: "Tip threshold:" }
-                    Slider {
-                        id: thr
+                    spacing: 6
+                    RowLayout {
                         Layout.fillWidth: true
-                        from: 0; to: 2047; stepSize: 1
-                        value: controller.pen.threshold
-                        onMoved: controller.pen.threshold = Math.round(value)
+                        spacing: 8
+                        Label { text: "Click pressure:" }
+                        Slider {
+                            id: thr
+                            Layout.fillWidth: true
+                            from: 1; to: 2047; stepSize: 1
+                            value: controller.pen.threshold
+                            onMoved: controller.pen.threshold = Math.round(value)
+                        }
+                        Label {
+                            Layout.preferredWidth: 90
+                            text: page.thresholdWord(thr.value)
+                            color: "#cfe3ff"
+                        }
                     }
-                    Label { text: Math.round(thr.value); Layout.preferredWidth: 40 }
+                    Label {
+                        Layout.fillWidth: true
+                        wrapMode: Text.WordWrap
+                        text: "Minimum tip pressure before a click registers — lower means a "
+                              + "lighter touch. (This is pressure, not double-click distance.)"
+                        color: "#9aa"
+                        font.pixelSize: 12
+                    }
                 }
             }
 
@@ -106,6 +138,31 @@ Item {
             }
 
             Item { Layout.fillHeight: true }
+        }
+    }
+
+    Dialog {
+        id: presetDialog
+        anchors.centerIn: parent
+        modal: true
+        title: "Save pressure preset"
+        standardButtons: Dialog.Ok | Dialog.Cancel
+
+        ColumnLayout {
+            anchors.fill: parent
+            Label { text: "Preset name:" }
+            TextField {
+                id: presetName
+                Layout.fillWidth: true
+                Layout.minimumWidth: 240
+                onAccepted: presetDialog.accept()
+            }
+        }
+        onAccepted: {
+            var n = presetName.text.trim()
+            if (n === "") return
+            controller.pen.savePreset(n)
+            presetCombo.currentIndex = controller.pen.presetNames.indexOf(n)
         }
     }
 }

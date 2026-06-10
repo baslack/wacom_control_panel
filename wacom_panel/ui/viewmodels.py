@@ -18,6 +18,7 @@ from ..core.engine import (
 )
 from ..core.mapping import ANCHORS, ROTATIONS, Area
 from ..core.persistence import Persistence
+from ..core.pressure_presets import PressurePresetStore
 from ..core.profile import (
     ButtonAction,
     MappingConfig,
@@ -235,10 +236,16 @@ class PenVM(QObject):
     """Editable view of :class:`PenConfig` (pressure curve, threshold, pen buttons)."""
 
     changed = Signal()
+    presetsChanged = Signal()
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._p = PenConfig()
+        self._presets: PressurePresetStore | None = None
+
+    def set_preset_store(self, store: PressurePresetStore) -> None:
+        self._presets = store
+        self.presetsChanged.emit()
 
     def load(self, pen: PenConfig) -> None:
         self._p = pen
@@ -246,6 +253,37 @@ class PenVM(QObject):
 
     def to_config(self) -> PenConfig:
         return self._p
+
+    # ---- pressure presets ------------------------------------------------
+    presetNames = Property(
+        "QStringList",
+        lambda self: self._presets.names() if self._presets else [],
+        notify=presetsChanged,
+    )
+
+    @Slot(str)
+    def applyPreset(self, name: str) -> None:
+        if self._presets is None:
+            return
+        points = self._presets.get(name)
+        if points:
+            self._p.pressure_curve = list(points)
+            self.changed.emit()
+
+    @Slot(str)
+    def savePreset(self, name: str) -> None:
+        if self._presets and self._presets.save(name, list(self._p.pressure_curve)):
+            self.presetsChanged.emit()
+
+    @Slot(str)
+    def deletePreset(self, name: str) -> None:
+        if self._presets:
+            self._presets.delete(name)
+            self.presetsChanged.emit()
+
+    @Slot(str, result=bool)
+    def canDeletePreset(self, name: str) -> bool:
+        return bool(name) and self._presets is not None and not self._presets.is_builtin(name)
 
     def _curve_get(idx):  # noqa: N805
         return lambda self: self._p.pressure_curve[idx]
@@ -405,6 +443,7 @@ class Controller(QObject):
         self._mapping = MappingVM(self)
         self._mapping.set_context(self._tablet, self._outputs)
         self._pen = PenVM(self)
+        self._pen.set_preset_store(PressurePresetStore(self._store.root))
         self._touch = TouchVM(self)
         self._pad = PadVM(self)
         self._pad.set_context(self._tablet)
