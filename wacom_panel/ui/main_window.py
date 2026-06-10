@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
+    QCheckBox,
     QInputDialog,
     QMainWindow,
     QMessageBox,
@@ -13,6 +14,7 @@ from PySide6.QtWidgets import (
 
 from ..backend import devices, displays, xsetwacom
 from ..core.engine import apply_mapping
+from ..core.persistence import Persistence
 from ..core.profile import Profile
 from ..core.store import ProfileStore
 from .mapping_page import MappingPage
@@ -26,6 +28,7 @@ class MainWindow(QMainWindow):
         self.resize(940, 600)
 
         self.store = store or ProfileStore()
+        self.persistence = Persistence()
         self.tablets = devices.list_tablets() if xsetwacom.is_available() else []
         self.outputs = displays.list_outputs()
         self.tablet = self.tablets[0] if self.tablets else None
@@ -34,10 +37,14 @@ class MainWindow(QMainWindow):
         self.mapping_page = MappingPage()
         self.mapping_page.set_context(self.tablet, self.outputs)
 
+        self.persist_check = QCheckBox("Reapply active profile on login & device replug")
+        self.persist_check.setChecked(self.persistence.is_installed())
+
         central = QWidget()
         layout = QVBoxLayout(central)
         layout.addWidget(self.profile_bar)
         layout.addWidget(self.mapping_page, 1)
+        layout.addWidget(self.persist_check)
         self.setCentralWidget(central)
         self.setStatusBar(QStatusBar())
 
@@ -55,6 +62,8 @@ class MainWindow(QMainWindow):
         self.mapping_page.applyRequested.connect(self._on_apply)
         self.mapping_page.saveRequested.connect(self._on_save)
         self.mapping_page.revertRequested.connect(self._on_revert)
+
+        self.persist_check.toggled.connect(self._on_persist_toggled)
 
     # ---- profiles ---------------------------------------------------------
     def _reload_profiles(self) -> None:
@@ -133,6 +142,17 @@ class MainWindow(QMainWindow):
         profile = self._active()
         self.mapping_page.set_mapping(profile.mapping)
         self._status(f"Reverted to saved “{profile.name}”.")
+
+    def _on_persist_toggled(self, checked: bool) -> None:
+        if checked:
+            notes = self.persistence.install()
+            msg = "Auto-reapply enabled (login + hotplug)."
+            if notes:
+                QMessageBox.information(self, "Auto-reapply", "\n".join(notes))
+        else:
+            self.persistence.uninstall()
+            msg = "Auto-reapply disabled."
+        self._status(msg)
 
     def _status(self, msg: str) -> None:
         self.statusBar().showMessage(msg, 5000)

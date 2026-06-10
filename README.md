@@ -41,6 +41,22 @@ python -m wacom_panel
 pytest
 ```
 
+## Persistence (auto-reapply)
+
+`xsetwacom` settings are runtime-only. Enable the "Reapply active profile on login & device
+replug" toggle in the app (or use the CLI) to keep your mapping alive — no root required:
+
+```sh
+python -m wacom_panel --install-persistence     # login autostart + systemd --user watcher
+python -m wacom_panel --uninstall-persistence
+python -m wacom_panel --apply-active             # apply the active profile now (used by hooks)
+python -m wacom_panel --watch                    # hotplug watcher (the service runs this)
+```
+
+`--install-persistence` writes an XDG autostart entry (applies at login) and a
+`systemd --user` service that runs the hotplug watcher (reapplies on replug). The watcher uses
+`pyudev` when available and otherwise polls.
+
 ## License
 
 MIT

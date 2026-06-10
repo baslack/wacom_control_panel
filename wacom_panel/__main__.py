@@ -11,7 +11,10 @@ import sys
 
 from .backend import devices, displays, xsetwacom
 from .core.engine import apply_mapping, mapping_commands, tablet_native_area
+from .core.persistence import Persistence
 from .core.profile import MappingConfig
+from .core.store import ProfileStore
+from .core.watcher import apply_active, watch
 
 
 def _cmd_list() -> int:
@@ -62,6 +65,27 @@ def _cmd_apply(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_apply_active() -> int:
+    return 0 if apply_active(ProfileStore()) else 1
+
+
+def _cmd_watch() -> int:
+    return watch(ProfileStore())
+
+
+def _cmd_persistence(install: bool) -> int:
+    p = Persistence()
+    if install:
+        notes = p.install()
+        print(f"Installed login autostart + hotplug watcher under {p.app_dir.parent}.")
+        for note in notes:
+            print(f"  note: {note}")
+    else:
+        p.uninstall()
+        print("Removed auto-reapply hooks.")
+    return 0
+
+
 def _quote(token: str) -> str:
     return f'"{token}"' if " " in token else token
 
@@ -79,10 +103,26 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--zoom", type=float, default=1.0, help="0<zoom<=1, use less of the tablet")
     parser.add_argument("--touch", action="store_true", help="also map the touch device")
     parser.add_argument("--dry-run", action="store_true", help="print commands without running")
+    parser.add_argument("--apply-active", action="store_true",
+                        help="apply the active saved profile (used by login/hotplug hooks)")
+    parser.add_argument("--watch", action="store_true",
+                        help="run the hotplug watcher (reapply on device reconnect)")
+    parser.add_argument("--install-persistence", action="store_true",
+                        help="install login autostart + systemd --user hotplug watcher")
+    parser.add_argument("--uninstall-persistence", action="store_true",
+                        help="remove the auto-reapply hooks")
     args = parser.parse_args(argv)
 
     if args.list:
         return _cmd_list()
+    if args.apply_active:
+        return _cmd_apply_active()
+    if args.watch:
+        return _cmd_watch()
+    if args.install_persistence:
+        return _cmd_persistence(install=True)
+    if args.uninstall_persistence:
+        return _cmd_persistence(install=False)
     if args.apply:
         return _cmd_apply(args)
 
