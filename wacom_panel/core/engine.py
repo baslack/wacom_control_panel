@@ -52,14 +52,23 @@ def resolve_maptooutput(mapping: MappingConfig, outputs: list[Output]) -> str:
     return f"{w}x{h}+{x}+{y}"
 
 
+def target_size(mapping: MappingConfig, outputs: list[Output]) -> tuple[int, int] | None:
+    """Pixel size of the mapping target: the chosen output, or the whole-desktop bounds."""
+    if mapping.output:
+        target = next((o for o in outputs if o.name == mapping.output), None)
+        return (target.width, target.height) if target is not None else None
+    _x, _y, w, h = desktop_bounds(outputs)
+    return (w, h) if w > 0 and h > 0 else None
+
+
 def resolve_area(mapping: MappingConfig, tablet: Tablet, outputs: list[Output]) -> Area | None:
     """The Area to apply: recomputed from proportions, or the stored explicit area."""
-    if mapping.force_proportions and mapping.output:
-        target = next((o for o in outputs if o.name == mapping.output), None)
-        if target is not None:
+    if mapping.force_proportions:
+        size = target_size(mapping, outputs)
+        if size is not None:
             tw, th = tablet_native_area(tablet)
             return forced_area(
-                tw, th, target.width, target.height,
+                tw, th, size[0], size[1],
                 anchor=mapping.anchor, zoom=mapping.zoom, rotate=mapping.rotate,
             )
     return mapping.area_obj

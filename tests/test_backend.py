@@ -1,5 +1,7 @@
 """Tests for parsing and command-building in the backend + engine (no real subprocess)."""
 
+import pytest
+
 from wacom_panel.backend import xsetwacom
 from wacom_panel.backend.devices import (
     group_tablets,
@@ -7,7 +9,7 @@ from wacom_panel.backend.devices import (
     tablet_base_name,
 )
 from wacom_panel.backend.displays import desktop_bounds, parse_listmonitors
-from wacom_panel.core.engine import mapping_commands, resolve_maptooutput
+from wacom_panel.core.engine import mapping_commands, resolve_area, resolve_maptooutput
 from wacom_panel.core.profile import MappingConfig
 
 LIST_DEVICES = """\
@@ -94,6 +96,24 @@ def test_mapping_commands_cover_pen_tools_only_by_default():
     # Each pen tool gets Mode, Rotate, Area, MapToOutput.
     params = [c[3] for c in cmds if c[2] == "Wacom Intuos Pro M Pen stylus"]
     assert params == ["Mode", "Rotate", "Area", "MapToOutput"]
+
+
+def test_force_proportions_whole_desktop_uses_combined_aspect():
+    tablet = group_tablets(parse_devices(LIST_DEVICES))[0]
+    outs = parse_listmonitors(LIST_MONITORS)  # 3840x1080 combined -> aspect 3.556
+    mapping = MappingConfig(output=None, force_proportions=True)
+    area = resolve_area(mapping, tablet, outs)
+    assert area is not None
+    # Letterboxed to the dual-monitor aspect: full width, thin height.
+    assert area.aspect == pytest.approx(3840 / 1080, rel=1e-3)
+    assert area.x1 == 0 and area.x2 == 44704
+
+
+def test_force_proportions_single_output():
+    tablet = group_tablets(parse_devices(LIST_DEVICES))[0]
+    outs = parse_listmonitors(LIST_MONITORS)
+    area = resolve_area(MappingConfig(output="DP-4", force_proportions=True), tablet, outs)
+    assert area is not None and area.aspect == pytest.approx(1920 / 1080, rel=1e-3)
 
 
 def test_mapping_commands_include_touch_when_requested():
