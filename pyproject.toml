@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wacom-control-panel"
+version = "0.1.0"
+description = "A graphical xsetwacom frontend with aspect-correct tablet-to-display mapping"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "nimajneb" }]
+dependencies = [
+    "PySide6>=6.5",
+]
+
+[project.optional-dependencies]
+# Userspace replug watcher (no root). Falls back to polling if absent.
+udev = ["pyudev>=0.24"]
+dev = [
+    "pytest>=7",
+    "ruff>=0.4",
+]
+
+[project.scripts]
+wacom-panel = "wacom_panel.__main__:main"
+
+[project.gui-scripts]
+wacom-panel-gui = "wacom_panel.app:main"
+
+[tool.setuptools.packages.find]
+include = ["wacom_panel*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
