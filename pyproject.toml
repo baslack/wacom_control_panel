@@ -31,6 +31,9 @@ wacom-panel-gui = "wacom_panel.app:main"
 [tool.setuptools.packages.find]
 include = ["wacom_panel*"]
 
+[tool.setuptools.package-data]
+"wacom_panel" = ["ui/qml/*.qml"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py310"

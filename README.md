@@ -1,7 +1,8 @@
 # Wacom Control Panel
 
 A graphical [`xsetwacom`](https://github.com/linuxwacom/xf86-input-wacom) frontend for
-Linux/X11, built with PySide6. Its centerpiece is a visual tablet-to-display mapping editor
+Linux/X11, built with PySide6 / QtQuick (Material style). Its centerpiece is a visual
+tablet-to-display mapping editor
 with **forced proportions** — aspect-correct, distortion-free mapping that the stock control
 panels lack — plus named profiles that survive reboot, logout, and replug.
 
@@ -23,6 +24,10 @@ Under active development. See `eager-orbiting-salamander.md` plan / the build ph
 - **Phase 1** — MVP visual mapping UI with profiles. *(usable milestone)*
 - **Phase 2** — auto-reapply persistence (login autostart + replug watcher).
 - **Phase 3** — pressure curve, pen/pad buttons, touch toggles.
+
+The UI is QtQuick/QML (`wacom_panel/ui/qml/`) bound to QObject view-models
+(`wacom_panel/ui/viewmodels.py`); all device/mapping logic lives in the Qt-free `core` and
+`backend` layers, so the UI is a thin, swappable shell.
 
 ## Development
 

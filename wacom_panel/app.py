@@ -1,18 +1,20 @@
-"""GUI bootstrap: QApplication, Wayland guard, main window."""
+"""GUI bootstrap: QtQuick (QML) application with the Material style."""
 
 from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
+
+QML_MAIN = Path(__file__).parent / "ui" / "qml" / "Main.qml"
 
 
 def _session_warning() -> str | None:
     """Return a warning string if xsetwacom is unlikely to work in this session."""
     if os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland":
         return (
-            "You appear to be running a Wayland session. xsetwacom only works under X11, "
-            "so applying settings will have no effect. Log into an X11/Xorg session to use "
-            "this app."
+            "Wayland session detected — xsetwacom only works under X11, so applying will "
+            "have no effect. Log into an X11/Xorg session."
         )
     if not os.environ.get("DISPLAY"):
         return "No X11 DISPLAY found; xsetwacom commands will fail."
@@ -20,19 +22,30 @@ def _session_warning() -> str | None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    from PySide6.QtWidgets import QApplication, QMessageBox
+    from PySide6.QtCore import QUrl
+    from PySide6.QtGui import QGuiApplication
+    from PySide6.QtQml import QQmlApplicationEngine
+    from PySide6.QtQuickControls2 import QQuickStyle
 
-    from .ui.main_window import MainWindow
+    from .ui.viewmodels import Controller
 
-    app = QApplication.instance() or QApplication(sys.argv if argv is None else [sys.argv[0]])
+    app = QGuiApplication.instance() or QGuiApplication(
+        sys.argv if argv is None else [sys.argv[0]]
+    )
     app.setApplicationName("Wacom Control Panel")
+    QQuickStyle.setStyle("Material")
 
-    window = MainWindow()
-    window.show()
+    controller = Controller()
+    engine = QQmlApplicationEngine()
+    engine.rootContext().setContextProperty("controller", controller)
+    engine.load(QUrl.fromLocalFile(str(QML_MAIN)))
+    if not engine.rootObjects():
+        print("Failed to load QML UI.", file=sys.stderr)
+        return 1
 
     warning = _session_warning()
     if warning:
-        QMessageBox.warning(window, "Session warning", warning)
+        controller.statusMessage.emit(warning)
 
     return app.exec()
 
