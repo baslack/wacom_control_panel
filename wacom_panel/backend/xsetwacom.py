@@ -55,6 +55,15 @@ def get_shell(device: str) -> str:
     return _run(["--shell", device])
 
 
+def get_shell_all(device: str) -> str:
+    """Shell-format dump of every parameter (``-s --get <device> all``).
+
+    Unlike plain ``--get``, this prints button/action parameters as ``set`` commands, so it can
+    be parsed to discover which buttons a device actually has.
+    """
+    return _run(["-s", "--get", device, "all"])
+
+
 def build_set_command(device: str, param: str, *values: object) -> list[str]:
     """Build the argv for a ``--set`` call (no execution). Pure, used by apply-script gen."""
     return [BINARY, "--set", device, param, *(str(v) for v in values)]

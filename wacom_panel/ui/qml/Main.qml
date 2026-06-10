@@ -60,6 +60,7 @@ ApplicationWindow {
             Layout.fillWidth: true
             TabButton { text: "Mapping" }
             TabButton { text: "Pen" }
+            TabButton { text: "Pad" }
             TabButton { text: "Touch" }
         }
     }
@@ -70,6 +71,7 @@ ApplicationWindow {
         currentIndex: tabs.currentIndex
         MappingPage {}
         PenPage {}
+        PadPage {}
         TouchPage {}
     }
 

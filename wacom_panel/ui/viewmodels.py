@@ -10,7 +10,12 @@ from __future__ import annotations
 from PySide6.QtCore import Property, QObject, Signal, Slot
 
 from ..backend import devices, displays, xsetwacom
-from ..core.engine import apply_profile, resolve_area, tablet_native_area
+from ..core.engine import (
+    apply_profile,
+    detect_pad_buttons,
+    resolve_area,
+    tablet_native_area,
+)
 from ..core.mapping import ANCHORS, ROTATIONS, Area
 from ..core.persistence import Persistence
 from ..core.profile import (
@@ -340,6 +345,49 @@ class TouchVM(QObject):
     tapTime = Property(int, _tt_g, _tt_s, notify=changed)
 
 
+class PadVM(QObject):
+    """Editable view of :class:`PadConfig` over the pad's detected ExpressKey buttons."""
+
+    changed = Signal()
+
+    def __init__(self, parent: QObject | None = None) -> None:
+        super().__init__(parent)
+        self._cfg = PadConfig()
+        self._numbers: list[int] = []
+
+    def set_context(self, tablet) -> None:
+        self._numbers = detect_pad_buttons(tablet) if tablet is not None else []
+        self.changed.emit()
+
+    def load(self, pad: PadConfig) -> None:
+        self._cfg = pad
+        self.changed.emit()
+
+    def to_config(self) -> PadConfig:
+        return self._cfg
+
+    def _action_for(self, num: int) -> ButtonAction:
+        return self._cfg.buttons.get(str(num)) or ButtonAction("button", str(num))
+
+    def _get_model(self) -> list:
+        model = []
+        for num in self._numbers:
+            action = self._action_for(num)
+            model.append({
+                "num": num, "kind": action.kind, "value": action.value,
+                "label": f"Button {num}",
+            })
+        return model
+
+    buttonModel = Property("QVariantList", _get_model, notify=changed)
+    hasButtons = Property(bool, lambda self: bool(self._numbers), notify=changed)
+
+    @Slot(int, str, str)
+    def setButton(self, num: int, kind: str, value: str) -> None:
+        self._cfg.buttons[str(num)] = ButtonAction(kind=kind, value=value)
+        self.changed.emit()
+
+
 class Controller(QObject):
     """Top-level object exposed to QML: profiles, actions, persistence + the mapping VM."""
 
@@ -358,12 +406,14 @@ class Controller(QObject):
         self._mapping.set_context(self._tablet, self._outputs)
         self._pen = PenVM(self)
         self._touch = TouchVM(self)
-        self._pad = PadConfig()
+        self._pad = PadVM(self)
+        self._pad.set_context(self._tablet)
         self._load_active()
 
     mapping = Property(QObject, lambda self: self._mapping, constant=True)
     pen = Property(QObject, lambda self: self._pen, constant=True)
     touch = Property(QObject, lambda self: self._touch, constant=True)
+    pad = Property(QObject, lambda self: self._pad, constant=True)
     tabletName = Property(
         str, lambda self: self._tablet.name if self._tablet else "(no tablet detected)",
         constant=True,
@@ -381,7 +431,7 @@ class Controller(QObject):
         self._mapping.load(profile.mapping)
         self._pen.load(profile.pen)
         self._touch.load(profile.touch)
-        self._pad = profile.pad
+        self._pad.load(profile.pad)
 
     def _current_profile(self) -> Profile:
         name = self._store.get_active() or "Default"
@@ -390,7 +440,7 @@ class Controller(QObject):
             mapping=self._mapping.to_mapping(),
             pen=self._pen.to_config(),
             touch=self._touch.to_config(),
-            pad=self._pad,
+            pad=self._pad.to_config(),
         )
 
     def _load_active(self) -> None:

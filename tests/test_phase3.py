@@ -3,6 +3,7 @@
 from wacom_panel.backend.devices import group_tablets, parse_devices
 from wacom_panel.core.engine import (
     pad_commands,
+    parse_pad_buttons,
     pen_commands,
     profile_commands,
     touch_commands,
@@ -87,6 +88,20 @@ def test_pad_commands_sorted_by_button_number():
     assert nums == ["8", "13"]
     assert cmds[0][2] == "Wacom Intuos Pro M Pad pad"
     assert cmds[0][5] == "key ctrl z"
+
+
+PAD_SHELL_ALL = '''\
+xsetwacom set "Wacom Intuos Pro M Pad pad" "Button" "1" "button +1 "
+xsetwacom set "Wacom Intuos Pro M Pad pad" "Button" "3" "button +3 "
+xsetwacom set "Wacom Intuos Pro M Pad pad" "Button" "8" "key +Control_L +z -z "
+xsetwacom set "Wacom Intuos Pro M Pad pad" "Button" "13" "button +13 "
+xsetwacom set "Wacom Intuos Pro M Pad pad" "AbsWheelUp" "3" "button +4 -4 "
+'''
+
+
+def test_parse_pad_buttons():
+    # Button numbers in order; the AbsWheel line is not a Button and is ignored.
+    assert parse_pad_buttons(PAD_SHELL_ALL) == [1, 3, 8, 13]
 
 
 def test_profile_commands_combines_all_sections():

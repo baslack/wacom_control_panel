@@ -6,6 +6,8 @@ generated apply-script — so what you preview is exactly what gets persisted an
 
 from __future__ import annotations
 
+import re
+
 from ..backend import xsetwacom
 from ..backend.devices import Tablet
 from ..backend.displays import Output, desktop_bounds
@@ -153,6 +155,30 @@ def touch_commands(touch: TouchConfig, tablet: Tablet) -> list[list[str]]:
         xsetwacom.build_set_command(dev.name, "ZoomDistance", touch.zoom_distance),
         xsetwacom.build_set_command(dev.name, "TapTime", touch.tap_time),
     ]
+
+
+_PAD_BUTTON_RE = re.compile(r'"Button"\s+"(\d+)"')
+
+
+def parse_pad_buttons(shell_all: str) -> list[int]:
+    """Pad button numbers present in a ``-s --get <pad> all`` dump, in order."""
+    seen: list[int] = []
+    for match in _PAD_BUTTON_RE.finditer(shell_all):
+        num = int(match.group(1))
+        if num not in seen:
+            seen.append(num)
+    return seen
+
+
+def detect_pad_buttons(tablet: Tablet) -> list[int]:
+    """Query the pad device for its available ExpressKey button numbers ([] if none)."""
+    pad = tablet.pad
+    if pad is None:
+        return []
+    try:
+        return parse_pad_buttons(xsetwacom.get_shell_all(pad.name))
+    except xsetwacom.XsetwacomError:
+        return []
 
 
 def pad_commands(pad: PadConfig, tablet: Tablet) -> list[list[str]]:
