@@ -37,6 +37,7 @@ def test_button_action_to_xsetwacom():
     assert ButtonAction("key", "ctrl z").to_xsetwacom() == "key ctrl z"
     assert ButtonAction("disabled", "").to_xsetwacom() == "0"
     assert ButtonAction("button", "").to_xsetwacom() == "0"  # empty -> disabled
+    assert ButtonAction("doubleclick", "").to_xsetwacom() == "button +1 -1 +1 -1"
 
 
 def test_profile_roundtrip_with_all_sections(tmp_path):

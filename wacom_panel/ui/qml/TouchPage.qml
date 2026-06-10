@@ -12,7 +12,7 @@ Item {
         clip: true
 
         ColumnLayout {
-            width: scroll.availableWidth
+            width: Math.min(scroll.availableWidth, 600)
             spacing: 12
 
             GroupBox {

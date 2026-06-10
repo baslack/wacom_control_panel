@@ -47,12 +47,14 @@ class ButtonAction:
     ``"ctrl z"``), or ``"disabled"``. Serialises to the xsetwacom action string.
     """
 
-    kind: str = "button"  # button | key | disabled
+    kind: str = "button"  # button | doubleclick | key | disabled
     value: str = ""
 
     def to_xsetwacom(self) -> str:
         if self.kind == "disabled":
             return "0"
+        if self.kind == "doubleclick":
+            return "button +1 -1 +1 -1"
         value = self.value.strip()
         if not value:
             return "0"

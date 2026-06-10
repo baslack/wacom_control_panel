@@ -12,7 +12,8 @@ Item {
         clip: true
 
         ColumnLayout {
-            width: scroll.availableWidth
+            // Cap the content width so the page doesn't stretch across a wide window.
+            width: Math.min(scroll.availableWidth, 600)
             spacing: 12
 
             GroupBox {
@@ -22,8 +23,9 @@ Item {
                     anchors.fill: parent
                     spacing: 8
                     PressureCurve {
-                        Layout.fillWidth: true
+                        Layout.preferredWidth: 320
                         Layout.preferredHeight: 260
+                        Layout.alignment: Qt.AlignHCenter
                     }
                     Label {
                         text: "Drag the two points — lower-left is a light touch, upper-right is firm."

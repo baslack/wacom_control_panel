@@ -1,5 +1,8 @@
 // Pressure response editor: a cubic curve from light (lower-left) to firm (upper-right)
 // with two draggable Bézier control points (xsetwacom PressureCurve, 0–100).
+//
+// Handles use DragHandler (not MouseArea) so they keep an exclusive grab through the whole
+// drag — robust to stylus/tablet input, which otherwise drops a plain MouseArea grab.
 import QtQuick
 
 Item {
@@ -13,8 +16,10 @@ Item {
 
     function px(v) { return m + v / 100 * (width - 2 * m) }
     function py(v) { return (height - m) - v / 100 * (height - 2 * m) }
-    function toX(pix) { return Math.max(0, Math.min(100, (pix - m) / (width - 2 * m) * 100)) }
-    function toY(piy) { return Math.max(0, Math.min(100, ((height - m) - piy) / (height - 2 * m) * 100)) }
+    // Convert a pixel delta to a 0–100 value delta along each axis (y is inverted).
+    function dvx(dpix) { return dpix / (width - 2 * m) * 100 }
+    function dvy(dpiy) { return -dpiy / (height - 2 * m) * 100 }
+    function clamp(v) { return Math.max(0, Math.min(100, Math.round(v))) }
 
     onP1xChanged: canvas.requestPaint()
     onP1yChanged: canvas.requestPaint()
@@ -41,14 +46,12 @@ Item {
                 ctx.beginPath(); ctx.moveTo(root.px(0), gy); ctx.lineTo(root.px(100), gy); ctx.stroke()
             }
 
-            // Control handle lines.
             ctx.strokeStyle = "#5a5a60"
             ctx.beginPath(); ctx.moveTo(root.px(0), root.py(0))
             ctx.lineTo(root.px(root.p1x), root.py(root.p1y)); ctx.stroke()
             ctx.beginPath(); ctx.moveTo(root.px(100), root.py(100))
             ctx.lineTo(root.px(root.p2x), root.py(root.p2y)); ctx.stroke()
 
-            // The curve.
             ctx.strokeStyle = "#5aa0ff"
             ctx.lineWidth = 2
             ctx.beginPath()
@@ -57,41 +60,48 @@ Item {
                               root.px(root.p2x), root.py(root.p2y),
                               root.px(100), root.py(100))
             ctx.stroke()
-
-            // Handles.
-            ctx.fillStyle = "#5aa0ff"
-            ctx.beginPath(); ctx.arc(root.px(root.p1x), root.py(root.p1y), 6, 0, 2 * Math.PI); ctx.fill()
-            ctx.beginPath(); ctx.arc(root.px(root.p2x), root.py(root.p2y), 6, 0, 2 * Math.PI); ctx.fill()
         }
     }
 
-    MouseArea {
-        anchors.fill: parent
-        property int activeHandle: 0  // 1 or 2
+    // ---- draggable control handles ---------------------------------------
+    component Handle: Rectangle {
+        property int vx: 0
+        property int vy: 0
+        property var commit  // function(newX, newY)
+        width: 22
+        height: 22
+        radius: 11
+        x: root.px(vx) - width / 2
+        y: root.py(vy) - height / 2
+        color: drag.active ? "#8fc0ff" : "#5aa0ff"
+        border.color: "#ffffff"
+        border.width: drag.active ? 2 : 0
 
-        function updateFrom(mx, my) {
-            var x = Math.round(root.toX(mx))
-            var y = Math.round(root.toY(my))
-            if (activeHandle === 1) {
-                controller.pen.p1x = x
-                controller.pen.p1y = y
-            } else if (activeHandle === 2) {
-                controller.pen.p2x = x
-                controller.pen.p2y = y
+        property real startX: 0
+        property real startY: 0
+
+        DragHandler {
+            id: drag
+            target: null
+            onActiveChanged: {
+                if (active) {
+                    parent.startX = parent.vx
+                    parent.startY = parent.vy
+                }
+            }
+            onTranslationChanged: {
+                parent.commit(root.clamp(parent.startX + root.dvx(translation.x)),
+                              root.clamp(parent.startY + root.dvy(translation.y)))
             }
         }
+    }
 
-        onPressed: function (mouse) {
-            var d1 = Math.hypot(mouse.x - root.px(root.p1x), mouse.y - root.py(root.p1y))
-            var d2 = Math.hypot(mouse.x - root.px(root.p2x), mouse.y - root.py(root.p2y))
-            activeHandle = (d1 <= d2 && d1 < 28) ? 1 : (d2 < 28 ? 2 : 0)
-            if (activeHandle !== 0)
-                updateFrom(mouse.x, mouse.y)
-        }
-        onPositionChanged: function (mouse) {
-            if (activeHandle !== 0)
-                updateFrom(mouse.x, mouse.y)
-        }
-        onReleased: activeHandle = 0
+    Handle {
+        vx: root.p1x; vy: root.p1y
+        commit: function (nx, ny) { controller.pen.p1x = nx; controller.pen.p1y = ny }
+    }
+    Handle {
+        vx: root.p2x; vy: root.p2y
+        commit: function (nx, ny) { controller.pen.p2x = nx; controller.pen.p2y = ny }
     }
 }
