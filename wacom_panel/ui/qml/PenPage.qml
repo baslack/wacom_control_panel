@@ -1,4 +1,5 @@
-// Pen: pressure response (+ named presets), tip click pressure, and pen-button actions.
+// Pen: pressure response (+ named presets) on the left; tip click-pressure and pen-button
+// actions on the right, so the whole tab fits without scrolling.
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -16,59 +17,63 @@ Item {
         return "Very firm"
     }
 
-    ScrollView {
-        id: scroll
+    RowLayout {
         anchors.fill: parent
         anchors.margins: 12
-        contentWidth: availableWidth
-        clip: true
+        spacing: 16
 
-        ColumnLayout {
-            // Cap the content width so the page doesn't stretch across a wide window.
-            width: Math.min(scroll.availableWidth, 600)
-            spacing: 12
+        // ---- Left: pressure curve + presets ------------------------------
+        GroupBox {
+            title: "Pressure curve"
+            Layout.alignment: Qt.AlignTop
 
-            GroupBox {
-                title: "Pressure curve"
-                Layout.fillWidth: true
-                ColumnLayout {
-                    anchors.fill: parent
+            ColumnLayout {
+                anchors.fill: parent
+                spacing: 8
+
+                PressureCurve {
+                    // Always square; sized to fit the window height, capped.
+                    property int side: Math.max(220, Math.min(360, page.height - 170))
+                    Layout.preferredWidth: side
+                    Layout.preferredHeight: side
+                    Layout.alignment: Qt.AlignHCenter
+                }
+                Label {
+                    Layout.preferredWidth: 360
+                    text: "Drag the two points — lower-left is a light touch, upper-right is firm."
+                    color: "#9aa"
+                    font.pixelSize: 12
+                    wrapMode: Text.WordWrap
+                }
+                RowLayout {
+                    Layout.fillWidth: true
                     spacing: 8
-
-                    PressureCurve {
-                        // Always square; scales down on narrow windows.
-                        property int side: Math.min(scroll.availableWidth - 60, 360)
-                        Layout.preferredWidth: side
-                        Layout.preferredHeight: side
-                        Layout.alignment: Qt.AlignHCenter
-                    }
-                    Label {
-                        text: "Drag the two points — lower-left is a light touch, upper-right is firm."
-                        color: "#9aa"
-                        font.pixelSize: 12
-                    }
-                    RowLayout {
+                    Label { text: "Preset:" }
+                    ComboBox {
+                        id: presetCombo
                         Layout.fillWidth: true
-                        spacing: 8
-                        Label { text: "Preset:" }
-                        ComboBox {
-                            id: presetCombo
-                            Layout.fillWidth: true
-                            model: controller.pen.presetNames
-                            onActivated: controller.pen.applyPreset(currentText)
-                        }
-                        Button {
-                            text: "Save…"
-                            onClicked: { presetName.text = ""; presetDialog.open() }
-                        }
-                        Button {
-                            text: "Delete"
-                            enabled: controller.pen.canDeletePreset(presetCombo.currentText)
-                            onClicked: controller.pen.deletePreset(presetCombo.currentText)
-                        }
+                        model: controller.pen.presetNames
+                        onActivated: controller.pen.applyPreset(currentText)
+                    }
+                    Button {
+                        text: "Save…"
+                        onClicked: { presetName.text = ""; presetDialog.open() }
+                    }
+                    Button {
+                        text: "Delete"
+                        enabled: controller.pen.canDeletePreset(presetCombo.currentText)
+                        onClicked: controller.pen.deletePreset(presetCombo.currentText)
                     }
                 }
             }
+        }
+
+        // ---- Right: tip feel + pen buttons -------------------------------
+        ColumnLayout {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            Layout.alignment: Qt.AlignTop
+            spacing: 12
 
             GroupBox {
                 title: "Tip click pressure"
