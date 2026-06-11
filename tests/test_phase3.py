@@ -35,6 +35,8 @@ def test_button_action_to_xsetwacom():
     assert ButtonAction("button", "3").to_xsetwacom() == "button +3"
     assert ButtonAction("button", "1").to_xsetwacom() == "button +1"
     assert ButtonAction("key", "ctrl z").to_xsetwacom() == "key ctrl z"
+    # Held-modifier form: "+mod" presses on button-down, auto-released on button-up.
+    assert ButtonAction("key", "+ctrl +shift").to_xsetwacom() == "key +ctrl +shift"
     assert ButtonAction("disabled", "").to_xsetwacom() == "0"
     assert ButtonAction("button", "").to_xsetwacom() == "0"  # empty -> disabled
     assert ButtonAction("doubleclick", "").to_xsetwacom() == "button +1 -1 +1 -1"

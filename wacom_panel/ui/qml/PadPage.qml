@@ -216,15 +216,19 @@ Item {
                             ColumnLayout {
                                 anchors.centerIn: parent
                                 spacing: 2
+                                width: parent.width - 12
                                 Label {
                                     text: controller.pad.ringCenterLabel
                                     color: "#e8e8ea"; font.pixelSize: 12; font.bold: true
                                     Layout.alignment: Qt.AlignHCenter
                                 }
                                 Label {
-                                    text: controller.pad.ringModes + " modes"
+                                    text: page.actionCaption(controller.pad.ringCenterKind,
+                                                             controller.pad.ringCenterValue)
                                     color: "#9aa"; font.pixelSize: 10
-                                    Layout.alignment: Qt.AlignHCenter
+                                    horizontalAlignment: Text.AlignHCenter
+                                    elide: Text.ElideRight
+                                    Layout.fillWidth: true
                                 }
                             }
                             MouseArea {
@@ -281,8 +285,11 @@ Item {
                     }
                     Label {
                         visible: controller.pad.hasRing
-                        text: "The ring’s centre button cycles its " + controller.pad.ringModes
-                              + " modes; CW / CCW are the scroll directions."
+                        text: "The touch ring sends one Clockwise and one Counter-clockwise "
+                              + "action (e.g. scroll up / down). xsetwacom can’t store a "
+                              + "different ring action per mode — that LED-cycling is a "
+                              + "proprietary-driver feature — so the centre button here is "
+                              + "just a normal bindable button."
                         color: "#9aa"
                         font.pixelSize: 12
                         wrapMode: Text.WordWrap
