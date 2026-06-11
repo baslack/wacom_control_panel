@@ -31,7 +31,7 @@ ui/
 flowchart LR
     subgraph V["View (QML, declarative)"]
         direction TB
-        M[Main.qml] --> P1[MappingPage]
+        M["Main.qml"] --> P1[MappingPage]
         M --> P2[PenPage]
         M --> P3[PadPage]
         M --> P4[TouchPage]
@@ -45,8 +45,8 @@ flowchart LR
     end
     subgraph Mdl["Model (core, pure Python)"]
         direction TB
-        PR[Profile + *Config]
-        EN[engine / store / mapping]
+        PR["Profile + *Config"]
+        EN["engine / store / mapping"]
     end
     V <-->|"bindings ↑ / Slots ↓"| VMs
     VMs --> Mdl
@@ -196,7 +196,7 @@ sequenceDiagram
     VM->>Cfg: mutate pure model (+ UI policy)
     VM-->>QML: someChanged()  [Signal/NOTIFY]
     QML->>VM: re-read bound properties  [getter]
-    Note over QML: affected bindings re-evaluate; UI updates
+    Note over QML: affected bindings re-evaluate — UI updates
 ```
 
 ---

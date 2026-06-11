@@ -205,9 +205,9 @@ sequenceDiagram
     participant M as MappingConfig + mapping.py
     U->>Q: drag the area rect
     Q->>VM: setAreaFromCanvas(x1,y1,x2,y2)  [Slot]
-    VM->>M: store area; if force-proportions, recompute
+    VM->>M: store area, then re-letterbox if force-proportions
     VM-->>Q: areaChanged  [Signal → NOTIFY]
-    Note over Q: every binding on areaX1.. re-evaluates;<br/>the rect + SpinBoxes update automatically
+    Note over Q: every binding on areaX1.. re-evaluates,<br/>so the rect + SpinBoxes update automatically
 ```
 
 **Clicking Apply:**
