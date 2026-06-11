@@ -109,6 +109,31 @@ def test_parse_pad_buttons():
     assert parse_pad_buttons(PAD_SHELL_ALL) == [1, 3, 8, 13]
 
 
+def test_pad_commands_include_wheel_params():
+    pad = PadConfig(
+        buttons={"1": ButtonAction("button", "1")},
+        wheels={"AbsWheelUp": ButtonAction("button", "4"),
+                "AbsWheelDown": ButtonAction("key", "ctrl plus")},
+    )
+    cmds = pad_commands(pad, _tablet())
+    # Wheel commands have the form [bin, --set, dev, Param, action] (no button-number arg).
+    wheels = {c[3]: c[4] for c in cmds if c[3] in ("AbsWheelUp", "AbsWheelDown")}
+    assert wheels["AbsWheelUp"] == "button +4"
+    assert wheels["AbsWheelDown"] == "key ctrl plus"
+    assert all(c[2] == "Wacom Intuos Pro M Pad pad" for c in cmds)
+
+
+def test_pad_wheels_roundtrip(tmp_path):
+    p = Profile(
+        name="Ring",
+        pad=PadConfig(wheels={"AbsWheelUp": ButtonAction("key", "ctrl plus")}),
+    )
+    path = tmp_path / "p.json"
+    p.save(path)
+    loaded = Profile.load(path)
+    assert loaded.pad.wheels["AbsWheelUp"] == ButtonAction("key", "ctrl plus")
+
+
 def test_profile_commands_combines_all_sections():
     from wacom_panel.backend.displays import parse_listmonitors
 

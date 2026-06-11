@@ -182,7 +182,7 @@ def detect_pad_buttons(tablet: Tablet) -> list[int]:
 
 
 def pad_commands(pad: PadConfig, tablet: Tablet) -> list[list[str]]:
-    """ExpressKey button mapping (pad device)."""
+    """ExpressKey + touch-ring mapping (pad device)."""
     dev = tablet.pad
     if dev is None:
         return []
@@ -191,6 +191,8 @@ def pad_commands(pad: PadConfig, tablet: Tablet) -> list[list[str]]:
         commands.append(
             xsetwacom.build_set_command(dev.name, "Button", num, action.to_xsetwacom())
         )
+    for param, action in sorted(pad.wheels.items()):
+        commands.append(xsetwacom.build_set_command(dev.name, param, action.to_xsetwacom()))
     return commands
 
 

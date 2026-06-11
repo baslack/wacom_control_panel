@@ -94,13 +94,15 @@ class TouchConfig:
 
 @dataclass
 class PadConfig:
-    """ExpressKey button mapping (applied to the pad device).
+    """ExpressKey + touch-ring mapping (applied to the pad device).
 
-    ``buttons`` maps an xsetwacom pad button number (as a string key, for JSON friendliness)
-    to its :class:`ButtonAction`.
+    ``buttons`` maps an xsetwacom pad button number (string key, for JSON friendliness) to its
+    :class:`ButtonAction`. ``wheels`` maps an xsetwacom wheel parameter name (e.g.
+    ``"AbsWheelUp"``) to its action, so ring directions are stored generically.
     """
 
     buttons: dict[str, ButtonAction] = field(default_factory=dict)
+    wheels: dict[str, ButtonAction] = field(default_factory=dict)
 
 
 def _button_action_from(data: object) -> ButtonAction:
@@ -139,8 +141,11 @@ class Profile:
 
         touch = TouchConfig(**(data.get("touch") or {}))
 
-        pad_buttons = (data.get("pad") or {}).get("buttons") or {}
-        pad = PadConfig(buttons={k: _button_action_from(v) for k, v in pad_buttons.items()})
+        pad_data = data.get("pad") or {}
+        pad = PadConfig(
+            buttons={k: _button_action_from(v) for k, v in (pad_data.get("buttons") or {}).items()},
+            wheels={k: _button_action_from(v) for k, v in (pad_data.get("wheels") or {}).items()},
+        )
 
         return cls(name=data["name"], mapping=mapping, pen=pen, touch=touch, pad=pad)
 

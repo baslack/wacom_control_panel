@@ -17,6 +17,7 @@ from ..core.engine import (
     tablet_native_area,
 )
 from ..core.mapping import ANCHORS, ROTATIONS, Area
+from ..core.pad_layout import PadLayout, load_layout
 from ..core.persistence import Persistence
 from ..core.pressure_presets import PressurePresetStore
 from ..core.profile import (
@@ -384,17 +385,22 @@ class TouchVM(QObject):
 
 
 class PadVM(QObject):
-    """Editable view of :class:`PadConfig` over the pad's detected ExpressKey buttons."""
+    """Editable view of :class:`PadConfig`, arranged by the tablet's physical pad layout."""
 
     changed = Signal()
+
+    # Default touch-ring actions (the device default is scroll up/down).
+    _WHEEL_DEFAULTS = {"up": ("button", "4"), "down": ("button", "5")}
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._cfg = PadConfig()
-        self._numbers: list[int] = []
+        self._layout: PadLayout = load_layout("", [])
 
     def set_context(self, tablet) -> None:
-        self._numbers = detect_pad_buttons(tablet) if tablet is not None else []
+        numbers = detect_pad_buttons(tablet) if tablet is not None else []
+        name = tablet.name if tablet is not None else ""
+        self._layout = load_layout(name, numbers)
         self.changed.emit()
 
     def load(self, pad: PadConfig) -> None:
@@ -404,26 +410,80 @@ class PadVM(QObject):
     def to_config(self) -> PadConfig:
         return self._cfg
 
-    def _action_for(self, num: int) -> ButtonAction:
+    # ---- helpers ---------------------------------------------------------
+    def _button_action(self, num: int) -> ButtonAction:
         return self._cfg.buttons.get(str(num)) or ButtonAction("button", str(num))
 
-    def _get_model(self) -> list:
-        model = []
-        for num in self._numbers:
-            action = self._action_for(num)
-            model.append({
-                "num": num, "kind": action.kind, "value": action.value,
-                "label": f"Button {num}",
+    def _key_model(self, keys) -> list:
+        out = []
+        for key in keys:
+            action = self._button_action(key.button)
+            out.append({
+                "num": key.button, "label": key.label,
+                "kind": action.kind, "value": action.value,
             })
-        return model
+        return out
 
-    buttonModel = Property("QVariantList", _get_model, notify=changed)
-    hasButtons = Property(bool, lambda self: bool(self._numbers), notify=changed)
+    def _wheel_param(self, direction: str) -> str | None:
+        if self._layout.ring is None:
+            return None
+        return self._layout.ring.cw if direction == "cw" else self._layout.ring.ccw
 
+    def _wheel_action(self, direction: str) -> ButtonAction:
+        param = self._wheel_param(direction)
+        if param and param in self._cfg.wheels:
+            return self._cfg.wheels[param]
+        kind, value = self._WHEEL_DEFAULTS["up" if direction == "cw" else "down"]
+        return ButtonAction(kind, value)
+
+    # ---- exposed structure ----------------------------------------------
+    hasPad = Property(bool, lambda self: bool(self._layout.all_buttons), notify=changed)
+    layoutMatched = Property(bool, lambda self: self._layout.matched, notify=changed)
+    displayName = Property(str, lambda self: self._layout.display_name, notify=changed)
+
+    topKeys = Property("QVariantList", lambda self: self._key_model(self._layout.top_keys),
+                       notify=changed)
+    bottomKeys = Property("QVariantList", lambda self: self._key_model(self._layout.bottom_keys),
+                          notify=changed)
+
+    hasRing = Property(bool, lambda self: self._layout.ring is not None, notify=changed)
+    ringModes = Property(int, lambda self: self._layout.ring.modes if self._layout.ring else 0,
+                         notify=changed)
+    ringCenterNum = Property(
+        int,
+        lambda self: self._layout.ring.center if self._layout.ring and self._layout.ring.center
+        else -1,
+        notify=changed,
+    )
+    ringCenterLabel = Property(
+        str, lambda self: self._layout.ring.center_label if self._layout.ring else "",
+        notify=changed,
+    )
+
+    def _center_action(self) -> ButtonAction:
+        num = self._layout.ring.center if self._layout.ring else None
+        return self._button_action(num) if num is not None else ButtonAction("disabled", "")
+
+    ringCenterKind = Property(str, lambda self: self._center_action().kind, notify=changed)
+    ringCenterValue = Property(str, lambda self: self._center_action().value, notify=changed)
+
+    cwKind = Property(str, lambda self: self._wheel_action("cw").kind, notify=changed)
+    cwValue = Property(str, lambda self: self._wheel_action("cw").value, notify=changed)
+    ccwKind = Property(str, lambda self: self._wheel_action("ccw").kind, notify=changed)
+    ccwValue = Property(str, lambda self: self._wheel_action("ccw").value, notify=changed)
+
+    # ---- edits -----------------------------------------------------------
     @Slot(int, str, str)
     def setButton(self, num: int, kind: str, value: str) -> None:
         self._cfg.buttons[str(num)] = ButtonAction(kind=kind, value=value)
         self.changed.emit()
+
+    @Slot(str, str, str)
+    def setWheel(self, direction: str, kind: str, value: str) -> None:
+        param = self._wheel_param(direction)
+        if param:
+            self._cfg.wheels[param] = ButtonAction(kind=kind, value=value)
+            self.changed.emit()
 
 
 class Controller(QObject):

@@ -32,7 +32,7 @@ wacom-panel-gui = "wacom_panel.app:main"
 include = ["wacom_panel*"]
 
 [tool.setuptools.package-data]
-"wacom_panel" = ["ui/qml/*.qml"]
+"wacom_panel" = ["ui/qml/*.qml", "layouts/*.json"]
 
 [tool.ruff]
 line-length = 100
