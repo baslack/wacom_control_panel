@@ -50,7 +50,10 @@ class ButtonAction:
     kind: str = "button"  # button | doubleclick | key | disabled
     value: str = ""
 
-    def to_xsetwacom(self) -> str:
+    def to_xsetwacom(self, *, momentary: bool = False) -> str:
+        """xsetwacom action string. ``momentary`` emits a full click (``+N -N``) instead of
+        a held press — required for the touch ring/strip, where each tick is one discrete
+        event and a never-released ``+N`` cannot scroll."""
         if self.kind == "disabled":
             return "0"
         if self.kind == "doubleclick":
@@ -62,8 +65,9 @@ class ButtonAction:
             return f"key {value}"
         # "+N" = press-and-hold (the driver releases on physical release), matching the
         # device defaults. A bare "N" expands to "+N -N" (an instant click) and breaks
-        # click-and-drag — so always emit the held form.
-        return f"button +{value}"
+        # click-and-drag — so for buttons we emit the held form, and only the ring asks for
+        # the momentary click.
+        return f"button +{value} -{value}" if momentary else f"button +{value}"
 
 
 def _action(kind: str, value: str) -> ButtonAction:

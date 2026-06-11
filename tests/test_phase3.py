@@ -120,7 +120,8 @@ def test_pad_commands_include_wheel_params():
     cmds = pad_commands(pad, _tablet())
     # Wheel commands have the form [bin, --set, dev, Param, action] (no button-number arg).
     wheels = {c[3]: c[4] for c in cmds if c[3] in ("AbsWheelUp", "AbsWheelDown")}
-    assert wheels["AbsWheelUp"] == "button +4"
+    # Ring ticks are momentary: a full "+N -N" click, not a never-released hold.
+    assert wheels["AbsWheelUp"] == "button +4 -4"
     assert wheels["AbsWheelDown"] == "key ctrl plus"
     assert all(c[2] == "Wacom Intuos Pro M Pad pad" for c in cmds)
 

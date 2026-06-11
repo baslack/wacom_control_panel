@@ -41,11 +41,16 @@ Item {
     // Friendly one-liner for an action, used as the caption under each key.
     function actionCaption(kind, value) {
         if (kind === "disabled" || value === "") return "—"
-        if (kind === "key") return "⌨ " + value
         if (kind === "doubleclick") return "Double click"
-        var names = { "1": "Left click", "2": "Middle click", "3": "Right click",
-                      "4": "Scroll up", "5": "Scroll down", "8": "Back", "9": "Forward" }
-        return names[value] !== undefined ? names[value] : ("Mouse " + value)
+        if (kind === "key") {
+            var keys = { "Up": "Scroll up ↑", "Down": "Scroll down ↓",
+                         "Prior": "Page up", "Next": "Page down" }
+            if (keys[value] !== undefined) return keys[value]
+            if (value.indexOf("+") >= 0)  // held-modifier combo: "+ctrl +shift"
+                return "Hold " + value.replace(/\+/g, "").replace(/\s+/g, "+")
+            return "⌨ " + value
+        }
+        return "Mouse " + value  // shouldn't occur on the pad
     }
 
     component KeyButton: Rectangle {
@@ -270,15 +275,18 @@ Item {
                     ActionEditor {
                         visible: page.selKind !== ""
                         Layout.fillWidth: true
+                        keyboardOnly: true
                         actKind: page.actKind
                         actValue: page.actValue
                         onEdited: function (kind, value) { page.commit(kind, value) }
                     }
 
                     Label {
-                        text: "Tip: keystrokes use xsetwacom syntax, e.g. “ctrl z”, "
-                              + "“shift f5”, “super”."
-                        color: "#9aa"
+                        text: "Pad keys send keystrokes only — mouse-button and scroll-wheel "
+                              + "actions don’t reach apps from the pad on X, so this menu "
+                              + "offers keys. The ring scrolls a line per detent via ↑/↓ "
+                              + "(Page up/down jumps a whole page)."
+                        color: "#caa05a"
                         font.pixelSize: 12
                         wrapMode: Text.WordWrap
                         Layout.fillWidth: true
@@ -286,10 +294,9 @@ Item {
                     Label {
                         visible: controller.pad.hasRing
                         text: "The touch ring sends one Clockwise and one Counter-clockwise "
-                              + "action (e.g. scroll up / down). xsetwacom can’t store a "
-                              + "different ring action per mode — that LED-cycling is a "
-                              + "proprietary-driver feature — so the centre button here is "
-                              + "just a normal bindable button."
+                              + "action. xsetwacom can’t store a different ring action per "
+                              + "mode — that LED-cycling is a proprietary-driver feature — so "
+                              + "the centre button here is just a normal bindable key."
                         color: "#9aa"
                         font.pixelSize: 12
                         wrapMode: Text.WordWrap

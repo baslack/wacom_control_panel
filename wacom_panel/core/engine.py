@@ -192,7 +192,9 @@ def pad_commands(pad: PadConfig, tablet: Tablet) -> list[list[str]]:
             xsetwacom.build_set_command(dev.name, "Button", num, action.to_xsetwacom())
         )
     for param, action in sorted(pad.wheels.items()):
-        commands.append(xsetwacom.build_set_command(dev.name, param, action.to_xsetwacom()))
+        commands.append(
+            xsetwacom.build_set_command(dev.name, param, action.to_xsetwacom(momentary=True))
+        )
     return commands
 
 

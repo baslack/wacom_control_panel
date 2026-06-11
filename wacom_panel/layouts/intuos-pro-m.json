@@ -1,23 +1,24 @@
 {
   "match": ["intuos pro m", "pth-660", "pth-651", "intuos pro 2 m"],
   "display_name": "Wacom Intuos Pro M",
+  "_note": "Button numbers verified empirically on PTH-660 (press each key, read xinput test-xi2). They do NOT match libwacom's letter order. Pad buttons only emit keystrokes on X/xf86-input-wacom; mouse-button actions silently fail.",
   "top_keys": [
-    { "button": 1, "label": "Key 1" },
-    { "button": 2, "label": "Key 2" },
-    { "button": 3, "label": "Key 3" },
-    { "button": 8, "label": "Key 4" }
+    { "button": 2, "label": "Key 1" },
+    { "button": 3, "label": "Key 2" },
+    { "button": 8, "label": "Key 3" },
+    { "button": 9, "label": "Key 4" }
   ],
   "ring": {
-    "center": 13,
+    "center": 1,
     "center_label": "Mode",
     "modes": 4,
-    "cw": "AbsWheelUp",
-    "ccw": "AbsWheelDown"
+    "cw": "AbsWheelDown",
+    "ccw": "AbsWheelUp"
   },
   "bottom_keys": [
-    { "button": 9, "label": "Key 5" },
-    { "button": 10, "label": "Key 6" },
-    { "button": 11, "label": "Key 7" },
-    { "button": 12, "label": "Key 8" }
+    { "button": 10, "label": "Key 5" },
+    { "button": 11, "label": "Key 6" },
+    { "button": 12, "label": "Key 7" },
+    { "button": 13, "label": "Key 8" }
   ]
 }

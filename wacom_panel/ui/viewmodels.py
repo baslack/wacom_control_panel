@@ -389,8 +389,10 @@ class PadVM(QObject):
 
     changed = Signal()
 
-    # Default touch-ring actions (the device default is scroll up/down).
-    _WHEEL_DEFAULTS = {"up": ("button", "4"), "down": ("button", "5")}
+    # Default touch-ring actions. Pad buttons only emit keystrokes on X (mouse-button /
+    # scroll-wheel actions silently fail), so the ring scrolls via arrow keys — one line per
+    # detent. cw (clockwise) scrolls down, ccw scrolls up.
+    _WHEEL_DEFAULTS = {"cw": ("key", "Down"), "ccw": ("key", "Up")}
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -412,7 +414,9 @@ class PadVM(QObject):
 
     # ---- helpers ---------------------------------------------------------
     def _button_action(self, num: int) -> ButtonAction:
-        return self._cfg.buttons.get(str(num)) or ButtonAction("button", str(num))
+        # Unset pad keys default to disabled: their hardware mouse-button default does
+        # nothing useful on X (pad buttons can only emit keystrokes), so don't pretend.
+        return self._cfg.buttons.get(str(num)) or ButtonAction("disabled", "")
 
     def _key_model(self, keys) -> list:
         out = []
@@ -433,7 +437,7 @@ class PadVM(QObject):
         param = self._wheel_param(direction)
         if param and param in self._cfg.wheels:
             return self._cfg.wheels[param]
-        kind, value = self._WHEEL_DEFAULTS["up" if direction == "cw" else "down"]
+        kind, value = self._WHEEL_DEFAULTS[direction]
         return ButtonAction(kind, value)
 
     # ---- exposed structure ----------------------------------------------

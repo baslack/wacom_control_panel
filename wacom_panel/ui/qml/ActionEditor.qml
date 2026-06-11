@@ -1,5 +1,7 @@
-// Reusable editor for a button action, with human-named presets plus
-// "Mouse button…" (arbitrary number), "Keystroke…", "Modifier hold…", and "Disabled".
+// Reusable editor for a button action.
+//   default mode      — mouse + keyboard presets (pen buttons can do real mouse buttons)
+//   keyboardOnly mode — keystroke presets only (pad buttons can ONLY emit keystrokes on X;
+//                       mouse-button actions silently fail there, so we don't offer them)
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -8,18 +10,17 @@ RowLayout {
     id: editor
     property string actKind: "button"
     property string actValue: ""
+    property bool keyboardOnly: false
     signal edited(string kind, string value)
 
     spacing: 6
 
-    // The held-modifier keysyms we offer (xsetwacom names). "+mod" = press on button-down,
-    // auto-released on button-up — i.e. hold the key/express-key to hold the modifier.
     readonly property var modifiers: [["ctrl", "Ctrl"], ["shift", "Shift"],
                                       ["alt", "Alt"], ["super", "Super"]]
 
-    // custom: undefined = fixed preset; "button" = show number; "key" = text field;
-    //         "modifier" = show modifier checkboxes.
-    readonly property var presets: [
+    // custom: undefined = fixed preset; "button" = number spin; "key" = text field;
+    //         "modifier" = modifier checkboxes.
+    readonly property var mousePresets: [
         { label: "Left click", kind: "button", value: "1" },
         { label: "Right click", kind: "button", value: "3" },
         { label: "Middle click", kind: "button", value: "2" },
@@ -33,8 +34,30 @@ RowLayout {
         { label: "Modifier hold…", kind: "key", value: "", custom: "modifier" },
         { label: "Disabled", kind: "disabled", value: "" }
     ]
+    readonly property var keyPresets: [
+        { label: "Scroll up (↑)", kind: "key", value: "Up" },
+        { label: "Scroll down (↓)", kind: "key", value: "Down" },
+        { label: "Page up", kind: "key", value: "Prior" },
+        { label: "Page down", kind: "key", value: "Next" },
+        { label: "Undo (Ctrl+Z)", kind: "key", value: "ctrl z" },
+        { label: "Redo (Ctrl+Shift+Z)", kind: "key", value: "ctrl shift z" },
+        { label: "Keystroke…", kind: "key", value: "", custom: "key" },
+        { label: "Modifier hold…", kind: "key", value: "", custom: "modifier" },
+        { label: "Disabled", kind: "disabled", value: "" }
+    ]
+    readonly property var presets: keyboardOnly ? keyPresets : mousePresets
 
-    // A "key" action is a held-modifier combo iff every token is one of our "+mod" tokens.
+    function findCustom(tag) {
+        for (var i = 0; i < presets.length; i++)
+            if (presets[i].custom === tag) return i
+        return -1
+    }
+    function findFixedKind(k) {
+        for (var i = 0; i < presets.length; i++)
+            if (presets[i].kind === k && presets[i].custom === undefined) return i
+        return -1
+    }
+
     function isModifierAction() {
         if (actKind !== "key" || actValue.trim() === "") return false
         var toks = actValue.trim().split(/\s+/)
@@ -43,23 +66,31 @@ RowLayout {
             if (known.indexOf(toks[i]) < 0) return false
         return true
     }
-
     function hasMod(mod) {
         return actKind === "key" && (" " + actValue + " ").indexOf("+" + mod + " ") >= 0
     }
 
     function presetIndex() {
-        if (actKind === "key") return isModifierAction() ? 10 : 9
-        if (actKind === "disabled") return 11
-        if (actKind === "doubleclick") return 3
-        for (var i = 0; i < presets.length; i++)
-            if (presets[i].kind === "button" && presets[i].custom === undefined
-                    && presets[i].value === actValue)
-                return i
-        return 8  // arbitrary mouse button
+        var i
+        if (actKind === "disabled") return Math.max(0, findFixedKind("disabled"))
+        if (actKind === "doubleclick") return Math.max(0, findFixedKind("doubleclick"))
+        if (actKind === "key") {
+            if (isModifierAction()) return Math.max(0, findCustom("modifier"))
+            for (i = 0; i < presets.length; i++)
+                if (presets[i].kind === "key" && presets[i].custom === undefined
+                        && presets[i].value === actValue) return i
+            return Math.max(0, findCustom("key"))
+        }
+        if (actKind === "button") {
+            for (i = 0; i < presets.length; i++)
+                if (presets[i].kind === "button" && presets[i].custom === undefined
+                        && presets[i].value === actValue) return i
+            var c = findCustom("button")
+            return c >= 0 ? c : Math.max(0, findFixedKind("disabled"))
+        }
+        return 0
     }
 
-    // Push the current checkbox state out as a single "key +a +b" action.
     function rebuildMods() {
         if (modRow.syncing) return
         var parts = []
@@ -69,8 +100,6 @@ RowLayout {
         }
         editor.edited("key", parts.join(" "))
     }
-
-    // Reflect actValue into the checkboxes without re-emitting (guarded against feedback).
     function syncMods() {
         if (!modBoxes) return
         modRow.syncing = true
@@ -87,7 +116,7 @@ RowLayout {
 
     ComboBox {
         id: combo
-        Layout.preferredWidth: 150
+        Layout.preferredWidth: 160
         textRole: "label"
         model: editor.presets
         currentIndex: editor.presetIndex()
