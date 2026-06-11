@@ -116,10 +116,12 @@ RowLayout {
 
     ComboBox {
         id: combo
-        Layout.preferredWidth: 160
+        Layout.preferredWidth: 200
         textRole: "label"
         model: editor.presets
         currentIndex: editor.presetIndex()
+        // Let the popup be as wide as its widest label so entries aren't clipped.
+        popup.width: Math.max(combo.width, 240)
         onActivated: {
             var p = editor.presets[currentIndex]
             if (p.custom === "button")

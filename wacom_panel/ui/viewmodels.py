@@ -410,6 +410,13 @@ class PadVM(QObject):
         self.changed.emit()
 
     def to_config(self) -> PadConfig:
+        # Materialise the ring's effective actions so Apply/Save always set the wheel, even
+        # if the user never touched it (otherwise the ring keeps whatever stale driver state).
+        if self._layout.ring is not None:
+            for direction in ("cw", "ccw"):
+                param = self._wheel_param(direction)
+                if param and param not in self._cfg.wheels:
+                    self._cfg.wheels[param] = self._wheel_action(direction)
         return self._cfg
 
     # ---- helpers ---------------------------------------------------------

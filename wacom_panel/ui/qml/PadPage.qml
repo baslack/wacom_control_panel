@@ -1,5 +1,6 @@
-// Pad: a spatial mock of the physical ExpressKeys + touch ring. Click a key (or a ring
-// direction / its centre mode button) to select it, then bind an action on the right.
+// Pad: a spatial mock of the physical ExpressKeys + touch ring on the left (scrolls if
+// needed); the action editor sits fixed on the right so it's always visible — click a key
+// or ring direction and bind its action without scrolling back up.
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -61,22 +62,23 @@ Item {
         property string value: ""
         property bool selected: page.selKind === "button" && page.selButton === num
         Layout.fillWidth: true
-        Layout.preferredHeight: 46
+        Layout.preferredHeight: 38
         radius: 6
         color: selected ? "#3949ab" : "#2b2b30"
         border.color: selected ? "#7986cb" : "#454550"
         border.width: 1
 
-        ColumnLayout {
+        RowLayout {
             anchors.fill: parent
-            anchors.margins: 6
-            spacing: 0
+            anchors.leftMargin: 8
+            anchors.rightMargin: 8
+            spacing: 8
             Label {
                 text: key.label
                 color: "#e8e8ea"
-                font.pixelSize: 13
+                font.pixelSize: 12
                 font.bold: true
-                Layout.fillWidth: true
+                Layout.preferredWidth: 48
                 elide: Text.ElideRight
             }
             Label {
@@ -84,6 +86,7 @@ Item {
                 color: "#9aa"
                 font.pixelSize: 11
                 Layout.fillWidth: true
+                horizontalAlignment: Text.AlignRight
                 elide: Text.ElideRight
             }
         }
@@ -94,47 +97,48 @@ Item {
         }
     }
 
-    ScrollView {
-        id: scroll
+    ColumnLayout {
         anchors.fill: parent
         anchors.margins: 12
-        contentWidth: availableWidth
-        clip: true
+        spacing: 10
 
-        ColumnLayout {
-            width: scroll.availableWidth
-            spacing: 14
+        Label {
+            text: controller.pad.displayName
+            color: "#e8e8ea"
+            font.pixelSize: 16
+            font.bold: true
+        }
+        Label {
+            visible: !controller.pad.hasPad
+            text: "No pad / ExpressKeys detected on this tablet."
+            color: "#9aa"
+        }
+        Label {
+            visible: controller.pad.hasPad && !controller.pad.layoutMatched
+            text: "Unknown model — showing a generic flat key list. Add a layout JSON "
+                  + "under wacom_panel/layouts/ to arrange it spatially."
+            color: "#caa05a"
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+        }
 
-            Label {
-                text: controller.pad.displayName
-                color: "#e8e8ea"
-                font.pixelSize: 16
-                font.bold: true
-            }
-            Label {
-                visible: !controller.pad.hasPad
-                text: "No pad / ExpressKeys detected on this tablet."
-                color: "#9aa"
-            }
-            Label {
-                visible: controller.pad.hasPad && !controller.pad.layoutMatched
-                text: "Unknown model — showing a generic flat key list. Add a layout JSON "
-                      + "under wacom_panel/layouts/ to arrange it spatially."
-                color: "#caa05a"
-                wrapMode: Text.WordWrap
-                Layout.fillWidth: true
-            }
+        RowLayout {
+            visible: controller.pad.hasPad
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            spacing: 24
 
-            RowLayout {
-                visible: controller.pad.hasPad
-                Layout.fillWidth: true
-                spacing: 20
+            // ---- Left: scrollable spatial mock of the pad --------------------
+            ScrollView {
+                id: padScroll
+                Layout.preferredWidth: 250
+                Layout.fillHeight: true
+                contentWidth: availableWidth
+                clip: true
 
-                // ---- Spatial mock of the pad -------------------------------
                 ColumnLayout {
-                    Layout.preferredWidth: 240
-                    Layout.alignment: Qt.AlignTop
-                    spacing: 8
+                    width: padScroll.availableWidth
+                    spacing: 6
 
                     Repeater {
                         model: controller.pad.topKeys
@@ -147,14 +151,14 @@ Item {
                         }
                     }
 
-                    // ---- Touch ring -------------------------------------
+                    // ---- Touch ring ---------------------------------------
                     Item {
                         visible: controller.pad.hasRing
                         Layout.alignment: Qt.AlignHCenter
-                        Layout.topMargin: 6
-                        Layout.bottomMargin: 6
-                        implicitWidth: 200
-                        implicitHeight: 200
+                        Layout.topMargin: 4
+                        Layout.bottomMargin: 4
+                        implicitWidth: 168
+                        implicitHeight: 168
 
                         Rectangle {  // outer ring
                             anchors.fill: parent
@@ -166,10 +170,10 @@ Item {
 
                         // Clockwise (top arc)
                         Rectangle {
-                            width: 96; height: 30; radius: 6
+                            width: 88; height: 26; radius: 6
                             anchors.horizontalCenter: parent.horizontalCenter
                             anchors.top: parent.top
-                            anchors.topMargin: 14
+                            anchors.topMargin: 12
                             color: (page.selKind === "wheel" && page.selDirection === "cw")
                                    ? "#3949ab" : "#2b2b30"
                             border.color: "#454550"
@@ -188,10 +192,10 @@ Item {
 
                         // Counter-clockwise (bottom arc)
                         Rectangle {
-                            width: 96; height: 30; radius: 6
+                            width: 88; height: 26; radius: 6
                             anchors.horizontalCenter: parent.horizontalCenter
                             anchors.bottom: parent.bottom
-                            anchors.bottomMargin: 14
+                            anchors.bottomMargin: 12
                             color: (page.selKind === "wheel" && page.selDirection === "ccw")
                                    ? "#3949ab" : "#2b2b30"
                             border.color: "#454550"
@@ -213,15 +217,15 @@ Item {
                             id: center
                             visible: controller.pad.ringCenterNum >= 0
                             anchors.centerIn: parent
-                            width: 84; height: 84; radius: width / 2
+                            width: 72; height: 72; radius: width / 2
                             color: (page.selKind === "button"
                                     && page.selButton === controller.pad.ringCenterNum)
                                    ? "#3949ab" : "#2b2b30"
                             border.color: "#454550"; border.width: 1
                             ColumnLayout {
                                 anchors.centerIn: parent
-                                spacing: 2
-                                width: parent.width - 12
+                                spacing: 1
+                                width: parent.width - 10
                                 Label {
                                     text: controller.pad.ringCenterLabel
                                     color: "#e8e8ea"; font.pixelSize: 12; font.bold: true
@@ -257,55 +261,56 @@ Item {
                         }
                     }
                 }
-
-                // ---- Action editor for the current selection ---------------
-                ColumnLayout {
-                    Layout.fillWidth: true
-                    Layout.alignment: Qt.AlignTop
-                    spacing: 10
-
-                    Label {
-                        text: page.selKind === "" ? "Select a key or ring direction"
-                                                  : page.selLabel
-                        color: "#e8e8ea"
-                        font.pixelSize: 15
-                        font.bold: true
-                    }
-
-                    ActionEditor {
-                        visible: page.selKind !== ""
-                        Layout.fillWidth: true
-                        keyboardOnly: true
-                        actKind: page.actKind
-                        actValue: page.actValue
-                        onEdited: function (kind, value) { page.commit(kind, value) }
-                    }
-
-                    Label {
-                        text: "Pad keys send keystrokes only — mouse-button and scroll-wheel "
-                              + "actions don’t reach apps from the pad on X, so this menu "
-                              + "offers keys. The ring scrolls a line per detent via ↑/↓ "
-                              + "(Page up/down jumps a whole page)."
-                        color: "#caa05a"
-                        font.pixelSize: 12
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
-                    }
-                    Label {
-                        visible: controller.pad.hasRing
-                        text: "The touch ring sends one Clockwise and one Counter-clockwise "
-                              + "action. xsetwacom can’t store a different ring action per "
-                              + "mode — that LED-cycling is a proprietary-driver feature — so "
-                              + "the centre button here is just a normal bindable key."
-                        color: "#9aa"
-                        font.pixelSize: 12
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
-                    }
-                }
             }
 
-            Item { Layout.fillHeight: true }
+            // ---- Right: fixed action editor (always visible) -----------------
+            ColumnLayout {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                Layout.alignment: Qt.AlignTop
+                spacing: 10
+
+                Label {
+                    text: page.selKind === "" ? "Select a key or ring direction"
+                                              : page.selLabel
+                    color: "#e8e8ea"
+                    font.pixelSize: 15
+                    font.bold: true
+                }
+
+                ActionEditor {
+                    visible: page.selKind !== ""
+                    Layout.fillWidth: true
+                    keyboardOnly: true
+                    actKind: page.actKind
+                    actValue: page.actValue
+                    onEdited: function (kind, value) { page.commit(kind, value) }
+                }
+
+                Label {
+                    text: "Pad keys send keystrokes only — mouse-button and scroll-wheel "
+                          + "actions don’t reach apps from the pad on X, so this menu "
+                          + "offers keys. The ring scrolls a line per detent via ↑/↓ "
+                          + "(Page up/down jumps a whole page)."
+                    color: "#caa05a"
+                    font.pixelSize: 12
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                }
+                Label {
+                    visible: controller.pad.hasRing
+                    text: "The touch ring sends one Clockwise and one Counter-clockwise "
+                          + "action. xsetwacom can’t store a different ring action per "
+                          + "mode — that LED-cycling is a proprietary-driver feature — so "
+                          + "the centre button here is just a normal bindable key."
+                    color: "#9aa"
+                    font.pixelSize: 12
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                }
+
+                Item { Layout.fillHeight: true }
+            }
         }
     }
 }
