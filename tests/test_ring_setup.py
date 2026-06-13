@@ -7,7 +7,9 @@ pkexec/sudo or touch ``/etc``.
 from wacom_panel.core.ring_setup import RingSetup
 
 
-def _setup(tmp_path, runner, *, user="alice", sg="/usr/bin/sg"):
+def _setup(tmp_path, runner, *, user="alice", sg="/usr/bin/sg", systemctl=None):
+    # systemctl defaults to a no-op so tests never start/stop/enable the *real* user service
+    # (its commands target the global service name, not our tmp config dir).
     return RingSetup(
         python="/usr/bin/python3",
         config_home=tmp_path,
@@ -15,6 +17,7 @@ def _setup(tmp_path, runner, *, user="alice", sg="/usr/bin/sg"):
         user=user,
         runner=runner,
         sg=sg,
+        systemctl=systemctl or (lambda *a: True),
     )
 
 
@@ -92,6 +95,21 @@ def test_uninstall_leaves_preexisting_group_membership_alone(tmp_path):
     s.uninstall()
 
     assert all("gpasswd" not in script for script in scripts)
+
+
+def test_install_and_uninstall_use_injected_systemctl(tmp_path):
+    # Guards against the tests (or anything else) shelling out to the real `systemctl --user`,
+    # whose enable/disable act on the global service name regardless of config_home.
+    calls = []
+    s = _setup(tmp_path, runner=lambda _s: True,
+               systemctl=lambda *a: calls.append(a) or True)
+    s.install()
+    assert ("daemon-reload",) in calls
+    assert ("enable", "--now", "wacom-control-panel-ring.service") in calls
+
+    calls.clear()
+    s.uninstall()
+    assert ("disable", "--now", "wacom-control-panel-ring.service") in calls
 
 
 def test_install_reports_failure_when_privileged_step_fails(tmp_path):

@@ -50,6 +50,18 @@ def _default_runner(script: str) -> bool:
     return False
 
 
+def _default_systemctl(*args: str) -> bool:
+    """Run a ``systemctl --user`` subcommand; True on success."""
+    try:
+        subprocess.run(
+            ["systemctl", "--user", *args],
+            check=True, capture_output=True, text=True,
+        )
+        return True
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return False
+
+
 def user_in_input_group(user: str | None = None) -> bool:
     """True if ``user`` is already a member of the ``input`` group (nothing to add)."""
     user = user or getpass.getuser()
@@ -70,12 +82,16 @@ class RingSetup:
         user: str | None = None,
         runner: Runner | None = None,
         sg: str | None = None,
+        systemctl: Callable[..., bool] | None = None,
     ) -> None:
         self.python = python or sys.executable
         self.config_home = config_home or _config_home()
         self.app_dir = app_dir or (self.config_home / "wacom-control-panel")
         self.user = user or getpass.getuser()
         self._run_privileged = runner or _default_runner
+        # Injectable so tests never touch the real `systemctl --user` (its enable/disable target
+        # the global service *name*, not our tmp config dir — a real side effect otherwise).
+        self._systemctl = systemctl or _default_systemctl
         # `sg` lets the service join the `input` group itself. Needed because a `systemd --user`
         # manager keeps the groups it had at login and won't gain `input` until a full re-login;
         # `sg` (setgid-root) joins a group the user is already a member of, with no password — so
@@ -208,14 +224,3 @@ class RingSetup:
     def _write(path: Path, content: str) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content)
-
-    @staticmethod
-    def _systemctl(*args: str) -> bool:
-        try:
-            subprocess.run(
-                ["systemctl", "--user", *args],
-                check=True, capture_output=True, text=True,
-            )
-            return True
-        except (FileNotFoundError, subprocess.CalledProcessError):
-            return False
