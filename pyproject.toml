@@ -17,6 +17,8 @@ dependencies = [
 [project.optional-dependencies]
 # Userspace replug watcher (no root). Falls back to polling if absent.
 udev = ["pyudev>=0.24"]
+# Touch-ring scroll daemon (reads ABS_WHEEL, injects REL_WHEEL via uinput).
+daemon = ["evdev>=1.6"]
 dev = [
     "pytest>=7",
     "ruff>=0.4",

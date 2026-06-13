@@ -309,6 +309,41 @@ Item {
                     Layout.fillWidth: true
                 }
 
+                // ---- Ring daemon: real scroll instead of keystrokes ----------
+                Rectangle {
+                    visible: controller.pad.hasRing
+                    Layout.fillWidth: true
+                    Layout.topMargin: 6
+                    implicitHeight: ringDaemonCol.implicitHeight + 20
+                    radius: 6
+                    color: "#26262b"
+                    border.color: "#454550"
+
+                    ColumnLayout {
+                        id: ringDaemonCol
+                        anchors.fill: parent
+                        anchors.margins: 10
+                        spacing: 6
+
+                        CheckBox {
+                            text: "Scroll with the background daemon (real wheel)"
+                            checked: controller.pad.ringDaemon
+                            onToggled: controller.pad.ringDaemon = checked
+                        }
+                        Label {
+                            text: "Emits real REL_WHEEL scroll via a small userspace daemon, "
+                                  + "so the ring scrolls smoothly like a mouse wheel instead of "
+                                  + "tapping arrow keys. The CW/CCW keystrokes above are ignored "
+                                  + "while this is on. One-time setup: run "
+                                  + "‘wacom-panel --install-ring-daemon’, then log out and back in."
+                            color: "#9aa"
+                            font.pixelSize: 11
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                        }
+                    }
+                }
+
                 Item { Layout.fillHeight: true }
             }
         }

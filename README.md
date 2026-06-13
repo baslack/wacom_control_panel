@@ -361,6 +361,11 @@ Things that cost real debugging on an Intuos Pro M (PTH-660) and shaped the desi
   via `ResetArea`, restores the previous area, and caches the result per process.
 - **Touch-ring "modes" are a proprietary-driver feature.** xsetwacom exposes one `AbsWheelUp`/
   `Down` pair with no per-mode multiplexing, so the ring's centre is just a normal bindable key.
+- **Real ring scrolling needs a daemon.** xsetwacom can't emit `REL_WHEEL`, so the optional
+  [`daemon/`](wacom_panel/daemon/README.md) reads the ring's raw `ABS_WHEEL` via evdev and
+  injects `REL_WHEEL` via uinput (below libinput → works on X11 *and* Wayland). It reads the
+  active LED mode from sysfs for future per-mode actions. Enable it with the "real scroll"
+  toggle on the Pad tab + `wacom-panel --install-ring-daemon`.
 
 ---
 
@@ -382,7 +387,11 @@ wacom_panel/
 │   ├── persistence.py    #   login autostart + systemd --user unit (pure renderers)
 │   ├── watcher.py        #   pyudev hotplug watcher (polling fallback)
 │   ├── pressure_presets.py
-│   └── pad_layout.py     #   physical pad layout from JSON
+│   ├── pad_layout.py     #   physical pad layout from JSON
+│   └── ring_setup.py     #   reversible ring-daemon install (udev + input group + service)
+├── daemon/               # touch-ring scroll daemon — see daemon/README.md
+│   ├── ring_translator.py #  pure: ABS_WHEEL → REL_WHEEL ticks (unit-tested)
+│   └── ring_daemon.py    #   evdev read + uinput inject loop
 ├── layouts/              # pad-layout JSON — see layouts/README.md
 │   └── intuos-pro-m.json
 └── ui/                   # Qt + QML — see ui/README.md
@@ -416,6 +425,9 @@ python -m wacom_panel [no flags]      launch the GUI
   --watch                             run the hotplug watcher
   --install-persistence               install login autostart + systemd --user watcher
   --uninstall-persistence             remove the auto-reapply hooks
+  --ring-daemon                       run the touch-ring scroll daemon (evdev → REL_WHEEL)
+  --install-ring-daemon               grant ring-daemon perms (udev + input group) + service
+  --uninstall-ring-daemon             remove the ring daemon's perms and service
 ```
 
 ---

@@ -483,6 +483,19 @@ class PadVM(QObject):
     ccwKind = Property(str, lambda self: self._wheel_action("ccw").kind, notify=changed)
     ccwValue = Property(str, lambda self: self._wheel_action("ccw").value, notify=changed)
 
+    # ---- ring daemon -----------------------------------------------------
+    def _get_ring_daemon(self) -> bool:
+        return self._cfg.ring_daemon
+
+    def _set_ring_daemon(self, value: bool) -> None:
+        if value != self._cfg.ring_daemon:
+            self._cfg.ring_daemon = value
+            self.changed.emit()
+
+    # When true the background daemon drives the ring as real REL_WHEEL scroll; when false the
+    # ring falls back to the xsetwacom keystroke mapping (cw/ccw above).
+    ringDaemon = Property(bool, _get_ring_daemon, _set_ring_daemon, notify=changed)
+
     # ---- edits -----------------------------------------------------------
     @Slot(int, str, str)
     def setButton(self, num: int, kind: str, value: str) -> None:

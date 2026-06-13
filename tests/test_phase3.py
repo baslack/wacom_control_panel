@@ -137,6 +137,60 @@ def test_pad_wheels_roundtrip(tmp_path):
     assert loaded.pad.wheels["AbsWheelUp"] == ButtonAction("key", "ctrl plus")
 
 
+def test_pad_commands_disable_ring_when_daemon_enabled():
+    # With the daemon on, the express keys stay bound but every ring param is silenced ("0"),
+    # so the X driver doesn't double up with the daemon's REL_WHEEL.
+    pad = PadConfig(
+        buttons={"2": ButtonAction("key", "shift")},
+        wheels={"AbsWheelUp": ButtonAction("key", "Up"),
+                "AbsWheelDown": ButtonAction("key", "Down")},
+        ring_daemon=True,
+    )
+    cmds = pad_commands(pad, _tablet())
+    wheels = {c[3]: c[4] for c in cmds if c[3] in ("AbsWheelUp", "AbsWheelDown")}
+    assert wheels == {"AbsWheelUp": "0", "AbsWheelDown": "0"}
+    # The express key is untouched.
+    buttons = {c[4]: c[5] for c in cmds if c[3] == "Button"}
+    assert buttons == {"2": "key shift"}
+
+
+def test_pad_commands_keystroke_ring_when_daemon_disabled():
+    # Default (daemon off) keeps the existing xsetwacom keystroke ring binding.
+    pad = PadConfig(wheels={"AbsWheelUp": ButtonAction("key", "Up")})
+    cmds = pad_commands(pad, _tablet())
+    wheels = {c[3]: c[4] for c in cmds if c[3] == "AbsWheelUp"}
+    assert wheels == {"AbsWheelUp": "key Up"}
+
+
+def test_pad_ring_daemon_fields_roundtrip(tmp_path):
+    from wacom_panel.core.profile import RingMode
+
+    p = Profile(
+        name="RingDaemon",
+        pad=PadConfig(
+            ring_daemon=True,
+            ring_modes=[RingMode(),
+                        RingMode(cw=ButtonAction("key", "Page_Down"),
+                                 ccw=ButtonAction("key", "Page_Up"))],
+        ),
+    )
+    path = tmp_path / "p.json"
+    p.save(path)
+    loaded = Profile.load(path)
+    assert loaded.pad.ring_daemon is True
+    assert len(loaded.pad.ring_modes) == 2
+    assert loaded.pad.ring_modes[0].cw == ButtonAction("scroll", "down")
+    assert loaded.pad.ring_modes[0].ccw == ButtonAction("scroll", "up")
+    assert loaded.pad.ring_modes[1].cw == ButtonAction("key", "Page_Down")
+
+
+def test_old_profile_without_ring_fields_loads_with_defaults():
+    # A profile saved before the ring daemon existed must load unchanged.
+    loaded = Profile.from_dict({"name": "Legacy", "pad": {"buttons": {}}})
+    assert loaded.pad.ring_daemon is False
+    assert loaded.pad.ring_modes == []
+
+
 def test_profile_commands_combines_all_sections():
     from wacom_panel.backend.displays import parse_listmonitors
 
