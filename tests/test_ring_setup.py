@@ -7,13 +7,14 @@ pkexec/sudo or touch ``/etc``.
 from wacom_panel.core.ring_setup import RingSetup
 
 
-def _setup(tmp_path, runner, *, user="alice"):
+def _setup(tmp_path, runner, *, user="alice", sg="/usr/bin/sg"):
     return RingSetup(
         python="/usr/bin/python3",
         config_home=tmp_path,
         app_dir=tmp_path / "app",
         user=user,
         runner=runner,
+        sg=sg,
     )
 
 
@@ -30,6 +31,20 @@ def test_render_systemd_unit_runs_ring_daemon(tmp_path):
     unit = s.render_systemd_unit()
     assert "--ring-daemon" in unit
     assert "/usr/bin/python3 -m wacom_panel --ring-daemon" in unit
+
+
+def test_exec_start_wraps_in_sg_when_available(tmp_path):
+    # The user systemd manager lacks the 'input' group until a full re-login, so the service
+    # joins it itself via sg.
+    s = _setup(tmp_path, runner=lambda _s: True, sg="/usr/bin/sg")
+    assert s.render_exec_start() == (
+        '/usr/bin/sg input -c "exec /usr/bin/python3 -m wacom_panel --ring-daemon"'
+    )
+
+
+def test_exec_start_plain_without_sg(tmp_path):
+    s = _setup(tmp_path, runner=lambda _s: True, sg="")
+    assert s.render_exec_start() == "/usr/bin/python3 -m wacom_panel --ring-daemon"
 
 
 def test_install_script_adds_group_only_when_requested(tmp_path):

@@ -19,6 +19,7 @@ from __future__ import annotations
 import getpass
 import grp
 import os
+import shutil
 import subprocess
 import sys
 from collections.abc import Callable
@@ -68,12 +69,18 @@ class RingSetup:
         app_dir: Path | None = None,
         user: str | None = None,
         runner: Runner | None = None,
+        sg: str | None = None,
     ) -> None:
         self.python = python or sys.executable
         self.config_home = config_home or _config_home()
         self.app_dir = app_dir or (self.config_home / "wacom-control-panel")
         self.user = user or getpass.getuser()
         self._run_privileged = runner or _default_runner
+        # `sg` lets the service join the `input` group itself. Needed because a `systemd --user`
+        # manager keeps the groups it had at login and won't gain `input` until a full re-login;
+        # `sg` (setgid-root) joins a group the user is already a member of, with no password — so
+        # the daemon gets pad access immediately and after every reboot, regardless of the manager.
+        self.sg = sg if sg is not None else (shutil.which("sg") or "")
 
     # ---- paths ------------------------------------------------------------
     @property
@@ -92,6 +99,13 @@ class RingSetup:
             'OPTIONS+="static_node=uinput"\n'
         )
 
+    def render_exec_start(self) -> str:
+        """The unit ExecStart, wrapped in ``sg input`` when available (see ``self.sg``)."""
+        daemon_cmd = f"{self.python} -m wacom_panel --ring-daemon"
+        if self.sg:
+            return f'{self.sg} input -c "exec {daemon_cmd}"'
+        return daemon_cmd
+
     def render_systemd_unit(self) -> str:
         return (
             "[Unit]\n"
@@ -101,7 +115,8 @@ class RingSetup:
             "\n"
             "[Service]\n"
             "Type=simple\n"
-            f"ExecStart={self.python} -m wacom_panel --ring-daemon\n"
+            "Environment=PYTHONUNBUFFERED=1\n"  # so the daemon's status reaches the journal live
+            f"ExecStart={self.render_exec_start()}\n"
             "Restart=on-failure\n"
             "RestartSec=3\n"
             "\n"
