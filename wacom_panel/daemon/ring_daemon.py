@@ -22,7 +22,7 @@ from pathlib import Path
 
 from ..core.profile import PadConfig
 from ..core.store import ProfileStore
-from .ring_translator import Emit, RingTranslator
+from .ring_translator import Emit, RingTranslator, ScrollSmoother
 
 try:  # optional dependency: the "daemon" extra
     import evdev
@@ -33,6 +33,8 @@ except ImportError:  # pragma: no cover - exercised via is_available()
 
 # How often the read loop wakes to re-check the reload/stop flags when the ring is idle.
 _TICK_S = 0.5
+# Fast cadence while paying out queued scroll, so smoothing runs well above the ~33 Hz ring.
+_PAYOUT_S = 0.006
 # Pause before re-scanning for the pad device when it is absent (unplugged / not yet ready).
 _RECONNECT_S = 2.0
 
@@ -93,6 +95,7 @@ class RingDaemon:
         self._stop = False
         self._reload = True
         self._translator = RingTranslator()
+        self._smoother = ScrollSmoother()
         self._warned: set[str] = set()
 
     # ---- config ----------------------------------------------------------
@@ -109,6 +112,9 @@ class RingDaemon:
         for e in emits:
             if e.kind == "wheel":
                 self._ui.write(ecodes.EV_REL, ecodes.REL_WHEEL, int(e.value))
+                wrote = True
+            elif e.kind == "wheel_hi":
+                self._ui.write(ecodes.EV_REL, ecodes.REL_WHEEL_HI_RES, int(e.value))
                 wrote = True
             elif "key" not in self._warned:
                 self._warned.add("key")
@@ -129,8 +135,10 @@ class RingDaemon:
         signal.signal(signal.SIGINT, lambda *_: setattr(self, "_stop", True))
 
         try:
-            self._ui = evdev.UInput(name="wacom-control-panel-ring",
-                                    events={ecodes.EV_REL: [ecodes.REL_WHEEL]})
+            self._ui = evdev.UInput(
+                name="wacom-control-panel-ring",
+                events={ecodes.EV_REL: [ecodes.REL_WHEEL, ecodes.REL_WHEEL_HI_RES]},
+            )
         except OSError as exc:
             print(f"ring daemon: cannot open /dev/uinput ({exc}). "
                   "Run 'wacom-panel --install-ring-daemon' to grant access.", file=sys.stderr)
@@ -144,6 +152,7 @@ class RingDaemon:
                     time.sleep(_RECONNECT_S)
                     continue
                 self._translator = RingTranslator(ring_max=_ring_max(dev))
+                self._smoother.reset()
                 self._reload = True
                 print(f"ring daemon: bound to {dev.name}.")
                 try:
@@ -165,14 +174,24 @@ class RingDaemon:
             if self._reload:
                 pad = self._load_pad()
                 self._reload = False
-            if not sel.select(timeout=_TICK_S):
-                continue
-            for event in dev.read():
-                if event.type != ecodes.EV_ABS or event.code != ecodes.ABS_WHEEL:
-                    continue
-                if not pad.ring_daemon:
-                    continue  # ring driven by xsetwacom keystrokes; daemon stays out
-                self._inject(self._translator.on_value(event.value, read_mode(led)))
+            # Drain queued scroll on a fast cadence; idle cheaply when there's nothing pending.
+            timeout = _PAYOUT_S if self._smoother.busy() else _TICK_S
+            if sel.select(timeout=timeout):
+                # Read the LED mode once per batch (it only changes on a centre-button press),
+                # not once per event — a sysfs open/read per wheel tick adds needless latency.
+                mode = read_mode(led) if pad.ring_daemon else 0
+                for event in dev.read():
+                    if event.type != ecodes.EV_ABS or event.code != ecodes.ABS_WHEEL:
+                        continue
+                    if not pad.ring_daemon:
+                        continue  # ring driven by xsetwacom keystrokes; daemon stays out
+                    for emit in self._translator.on_value(event.value, mode):
+                        if emit.kind == "wheel_hi":
+                            self._smoother.add(int(emit.value))
+                        else:
+                            self._inject([emit])  # key actions fire immediately, unsmoothed
+            # Pay out a smoothed slice of any pending scroll.
+            self._inject(self._smoother.tick())
 
 
 def run(store: ProfileStore | None = None) -> int:
