@@ -112,6 +112,17 @@ def test_install_and_uninstall_use_injected_systemctl(tmp_path):
     assert ("disable", "--now", "wacom-control-panel-ring.service") in calls
 
 
+def test_is_active_queries_systemctl(tmp_path):
+    calls = []
+    s = _setup(tmp_path, runner=lambda _s: True,
+               systemctl=lambda *a: calls.append(a) or True)
+    assert s.is_active() is True
+    assert ("is-active", "--quiet", "wacom-control-panel-ring.service") in calls
+
+    s_off = _setup(tmp_path, runner=lambda _s: True, systemctl=lambda *a: False)
+    assert s_off.is_active() is False
+
+
 def test_install_reports_failure_when_privileged_step_fails(tmp_path):
     s = _setup(tmp_path, runner=lambda _s: False)
     notes = s.install()

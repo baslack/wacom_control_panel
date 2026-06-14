@@ -166,6 +166,10 @@ class RingSetup:
     def is_installed(self) -> bool:
         return self.systemd_unit.exists()
 
+    def is_active(self) -> bool:
+        """True if the ``systemd --user`` ring service is currently running."""
+        return self._systemctl("is-active", "--quiet", RING_SERVICE_NAME)
+
     # ---- side effects -----------------------------------------------------
     def install(self) -> list[str]:
         """Grant permissions + install the user service. Returns human-readable notes."""

@@ -319,6 +319,10 @@ Item {
                     color: "#26262b"
                     border.color: "#454550"
 
+                    // Re-check daemon readiness when the page first shows (the service state
+                    // can change out of band — install/uninstall, reboot, manual stop).
+                    Component.onCompleted: controller.pad.refreshRingDaemon()
+
                     ColumnLayout {
                         id: ringDaemonCol
                         anchors.fill: parent
@@ -338,6 +342,17 @@ Item {
                                   + "‘wacom-panel --install-ring-daemon’, then log out and back in."
                             color: "#9aa"
                             font.pixelSize: 11
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                        }
+                        // Footgun guard: enabling the toggle silences the keystroke fallback, so
+                        // warn loudly if the daemon can't actually take over (else the ring dies).
+                        Label {
+                            visible: controller.pad.ringDaemon && !controller.pad.ringDaemonReady
+                            text: "⚠ " + controller.pad.ringDaemonStatus
+                            color: "#e57373"
+                            font.pixelSize: 11
+                            font.bold: true
                             wrapMode: Text.WordWrap
                             Layout.fillWidth: true
                         }
