@@ -22,6 +22,7 @@ from pathlib import Path
 
 from ..core.profile import PadConfig
 from ..core.store import ProfileStore
+from . import keymap
 from .ring_translator import Emit, RingTranslator, ScrollSmoother
 
 try:  # optional dependency: the "daemon" extra
@@ -116,12 +117,30 @@ class RingDaemon:
             elif e.kind == "wheel_hi":
                 self._ui.write(ecodes.EV_REL, ecodes.REL_WHEEL_HI_RES, int(e.value))
                 wrote = True
-            elif "key" not in self._warned:
-                self._warned.add("key")
-                print("ring daemon: 'key' ring actions are not supported yet; ignoring.",
-                      file=sys.stderr)
+            elif e.kind == "key":
+                wrote = self._tap_key(str(e.value)) or wrote
         if wrote:
             self._ui.syn()
+
+    def _tap_key(self, combo: str) -> bool:
+        """Press then release a key chord (e.g. ``"Next"``, ``"ctrl z"``). True if anything fired.
+
+        Presses are synced before the releases so the chord registers as a real keystroke rather
+        than a single simultaneous press+release report.
+        """
+        presses, releases = keymap.to_chord(combo)
+        if not presses:
+            if combo not in self._warned:
+                self._warned.add(combo)
+                print(f"ring daemon: no evdev keys for ring action {combo!r}; ignoring.",
+                      file=sys.stderr)
+            return False
+        for name in presses:
+            self._ui.write(ecodes.EV_KEY, ecodes.ecodes[name], 1)
+        self._ui.syn()
+        for name in releases:
+            self._ui.write(ecodes.EV_KEY, ecodes.ecodes[name], 0)
+        return True  # caller syns the releases
 
     # ---- loop ------------------------------------------------------------
     def run(self) -> int:
@@ -137,7 +156,12 @@ class RingDaemon:
         try:
             self._ui = evdev.UInput(
                 name="wacom-control-panel-ring",
-                events={ecodes.EV_REL: [ecodes.REL_WHEEL, ecodes.REL_WHEEL_HI_RES]},
+                events={
+                    ecodes.EV_REL: [ecodes.REL_WHEEL, ecodes.REL_WHEEL_HI_RES],
+                    # Advertise every key the keymap can emit, so per-mode "key" ring actions
+                    # (Page Down/Up, Undo, …) inject as real keystrokes.
+                    ecodes.EV_KEY: [ecodes.ecodes[n] for n in keymap.supported_evdev_names()],
+                },
             )
         except OSError as exc:
             print(f"ring daemon: cannot open /dev/uinput ({exc}). "
