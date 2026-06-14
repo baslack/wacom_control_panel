@@ -97,6 +97,19 @@ Item {
         }
     }
 
+    // A small LED on the ring, placed where the physical mode LEDs sit. Lights green for the
+    // mode the tablet is currently on (polled live). Indicator only — not clickable; the tablet
+    // chooses the mode and the editor follows it.
+    component RingLed: Rectangle {
+        property int mode: 0
+        readonly property bool lit: controller.pad.activeRingMode === mode
+        visible: controller.pad.ringDaemon && mode < controller.pad.ringModes
+        width: 14; height: 14; radius: 7
+        color: lit ? "#8bc34a" : "#3a3a40"
+        border.color: lit ? "#cde6a5" : "#555"
+        border.width: 1
+    }
+
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: 12
@@ -168,6 +181,14 @@ Item {
                             border.width: 2
                         }
 
+                        // Mode LEDs in the corners of the ring's bounding square — outside the
+                        // wheel, where the physical LEDs sit. Lit one = current mode; clockwise
+                        // from top-left = modes 1–4.
+                        RingLed { mode: 0; x: 2;                  y: 2 }                    // TL
+                        RingLed { mode: 1; x: parent.width - 16;  y: 2 }                    // TR
+                        RingLed { mode: 2; x: parent.width - 16;  y: parent.height - 16 }   // BR
+                        RingLed { mode: 3; x: 2;                  y: parent.height - 16 }   // BL
+
                         // Clockwise (top arc)
                         Rectangle {
                             width: 88; height: 26; radius: 6
@@ -184,6 +205,9 @@ Item {
                             }
                             MouseArea {
                                 anchors.fill: parent
+                                // When the daemon owns the ring, edit it via the per-mode editor
+                                // (right) instead of the xsetwacom keystroke direction here.
+                                enabled: !controller.pad.ringDaemon
                                 cursorShape: Qt.PointingHandCursor
                                 onClicked: page.selectWheel("cw", "Ring — clockwise",
                                     controller.pad.cwKind, controller.pad.cwValue)
@@ -206,19 +230,21 @@ Item {
                             }
                             MouseArea {
                                 anchors.fill: parent
+                                enabled: !controller.pad.ringDaemon
                                 cursorShape: Qt.PointingHandCursor
                                 onClicked: page.selectWheel("ccw", "Ring — counter-clockwise",
                                     controller.pad.ccwKind, controller.pad.ccwValue)
                             }
                         }
 
-                        // Centre mode button
+                        // Centre button. With the daemon on it is the tablet's mode switch (not
+                        // bindable) and shows the live mode; otherwise it's a normal bindable key.
                         Rectangle {
                             id: center
                             visible: controller.pad.ringCenterNum >= 0
                             anchors.centerIn: parent
                             width: 72; height: 72; radius: width / 2
-                            color: (page.selKind === "button"
+                            color: (!controller.pad.ringDaemon && page.selKind === "button"
                                     && page.selButton === controller.pad.ringCenterNum)
                                    ? "#3949ab" : "#2b2b30"
                             border.color: "#454550"; border.width: 1
@@ -227,11 +253,13 @@ Item {
                                 spacing: 1
                                 width: parent.width - 10
                                 Label {
-                                    text: controller.pad.ringCenterLabel
-                                    color: "#e8e8ea"; font.pixelSize: 12; font.bold: true
+                                    text: controller.pad.ringDaemon ? controller.pad.ringModeName
+                                                                    : controller.pad.ringCenterLabel
+                                    color: "#e8e8ea"; font.pixelSize: 13; font.bold: true
                                     Layout.alignment: Qt.AlignHCenter
                                 }
-                                Label {
+                                Label {  // action caption only on the bindable (non-daemon) path
+                                    visible: !controller.pad.ringDaemon
                                     text: page.actionCaption(controller.pad.ringCenterKind,
                                                              controller.pad.ringCenterValue)
                                     color: "#9aa"; font.pixelSize: 10
@@ -240,8 +268,14 @@ Item {
                                     Layout.fillWidth: true
                                 }
                             }
+                            // Tooltip explains the centre's role when the daemon owns mode-switching.
+                            HoverHandler { id: centerHover }
+                            ToolTip.visible: controller.pad.ringDaemon && centerHover.hovered
+                            ToolTip.text: "Mode switch — press the ring’s centre on the tablet\n"
+                                          + "to cycle LED modes. The editor follows the lit mode."
                             MouseArea {
                                 anchors.fill: parent
+                                enabled: !controller.pad.ringDaemon
                                 cursorShape: Qt.PointingHandCursor
                                 onClicked: page.selectButton(controller.pad.ringCenterNum,
                                     controller.pad.ringCenterLabel,
@@ -289,20 +323,22 @@ Item {
 
                 Label {
                     text: "Pad keys send keystrokes only — mouse-button and scroll-wheel "
-                          + "actions don’t reach apps from the pad on X, so this menu "
-                          + "offers keys. The ring scrolls a line per detent via ↑/↓ "
-                          + "(Page up/down jumps a whole page)."
+                          + "actions don’t reach apps from the pad on X, so this menu offers keys."
+                          + (controller.pad.ringDaemon ? ""
+                             : " The ring scrolls a line per detent via ↑/↓ "
+                               + "(Page up/down jumps a whole page).")
                     color: "#caa05a"
                     font.pixelSize: 12
                     wrapMode: Text.WordWrap
                     Layout.fillWidth: true
                 }
                 Label {
-                    visible: controller.pad.hasRing
+                    visible: controller.pad.hasRing && !controller.pad.ringDaemon
                     text: "The touch ring sends one Clockwise and one Counter-clockwise "
                           + "action. xsetwacom can’t store a different ring action per "
                           + "mode — that LED-cycling is a proprietary-driver feature — so "
-                          + "the centre button here is just a normal bindable key."
+                          + "the centre button here is just a normal bindable key. (Enable the "
+                          + "background daemon below for real scroll and per-mode actions.)"
                     color: "#9aa"
                     font.pixelSize: 12
                     wrapMode: Text.WordWrap
@@ -335,10 +371,9 @@ Item {
                             onToggled: controller.pad.ringDaemon = checked
                         }
                         Label {
-                            text: "Emits real REL_WHEEL scroll via a small userspace daemon, "
-                                  + "so the ring scrolls smoothly like a mouse wheel instead of "
-                                  + "tapping arrow keys. The CW/CCW keystrokes above are ignored "
-                                  + "while this is on. One-time setup: run "
+                            text: "Emits real REL_WHEEL scroll via a small userspace daemon, so "
+                                  + "the ring scrolls smoothly like a mouse wheel and each LED "
+                                  + "mode can have its own action. One-time setup: run "
                                   + "‘wacom-panel --install-ring-daemon’, then log out and back in."
                             color: "#9aa"
                             font.pixelSize: 11
@@ -355,6 +390,69 @@ Item {
                             font.bold: true
                             wrapMode: Text.WordWrap
                             Layout.fillWidth: true
+                        }
+
+                        // ---- Per-LED-mode ring actions (daemon only) ----------------
+                        // The tablet cycles 1–N LED modes via the ring centre; the daemon can
+                        // give each mode its own clockwise / counter-clockwise action.
+                        ColumnLayout {
+                            visible: controller.pad.ringDaemon
+                            Layout.fillWidth: true
+                            Layout.topMargin: 6
+                            spacing: 6
+
+                            // Poll the tablet's live LED mode while this page is showing.
+                            Timer {
+                                interval: 400
+                                repeat: true
+                                running: controller.pad.ringDaemon && page.visible
+                                onTriggered: controller.pad.refreshRingMode()
+                            }
+
+                            Label {
+                                text: "Editing " + controller.pad.ringModeName
+                                      + " (the mode lit on the tablet)"
+                                color: "#e8e8ea"; font.pixelSize: 13; font.bold: true
+                                Layout.topMargin: 2
+                            }
+                            Label {
+                                text: "Turn the ring’s centre button to switch modes — the lit "
+                                      + "LED and this editor follow the tablet."
+                                color: "#777"; font.pixelSize: 10
+                                wrapMode: Text.WordWrap
+                                Layout.fillWidth: true
+                            }
+
+                            Label {
+                                text: "↻ Clockwise"
+                                color: "#e8e8ea"; font.pixelSize: 12; font.bold: true
+                            }
+                            ActionEditor {
+                                Layout.fillWidth: true
+                                ringMode: true
+                                actKind: controller.pad.ringModeCwKind
+                                actValue: controller.pad.ringModeCwValue
+                                onEdited: function (kind, value) {
+                                    controller.pad.setRingMode("cw", kind, value)
+                                }
+                            }
+                            Label {
+                                text: "↺ Counter-clockwise"
+                                color: "#e8e8ea"; font.pixelSize: 12; font.bold: true
+                            }
+                            ActionEditor {
+                                Layout.fillWidth: true
+                                ringMode: true
+                                actKind: controller.pad.ringModeCcwKind
+                                actValue: controller.pad.ringModeCcwValue
+                                onEdited: function (kind, value) {
+                                    controller.pad.setRingMode("ccw", kind, value)
+                                }
+                            }
+                            Label {
+                                text: "Ring-mode changes take effect when you Save."
+                                color: "#9aa"; font.pixelSize: 10
+                            }
                         }
                     }
                 }

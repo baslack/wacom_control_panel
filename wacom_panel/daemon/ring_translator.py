@@ -33,7 +33,8 @@ class Emit:
 
     ``kind`` ``"wheel"``    → ``value`` is a classic ``REL_WHEEL`` delta (``+1`` up / ``-1`` down).
     ``kind`` ``"wheel_hi"`` → ``value`` is a ``REL_WHEEL_HI_RES`` delta (120 == one notch).
-    ``kind`` ``"key"``      → ``value`` is an xsetwacom-style key combo (Phase 2 in the daemon).
+    ``kind`` ``"key"``      → ``value`` is an xsetwacom-style key combo the daemon taps via uinput
+                              (mapped to evdev keycodes by :mod:`wacom_panel.daemon.keymap`).
     """
 
     kind: str

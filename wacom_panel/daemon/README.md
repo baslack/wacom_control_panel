@@ -9,7 +9,8 @@ Wayland** alike.
 
 ```
 daemon/
-├── ring_translator.py   # pure: ABS_WHEEL positions → scroll ticks (no evdev, unit-tested)
+├── ring_translator.py   # pure: ABS_WHEEL positions → scroll/key ticks (no evdev, unit-tested)
+├── keymap.py            # pure: xsetwacom key combo → evdev keycodes (no evdev, unit-tested)
 └── ring_daemon.py       # thin evdev/uinput I/O loop around the translator
 ```
 
@@ -33,14 +34,16 @@ the math is testable without a tablet — see `tests/test_ring_translator.py`.
   scroll-down clockwise / scroll-up counter-clockwise. `invert=` flips direction if a given
   unit's encoder counts the other way.
 
-It returns `Emit(kind, value)` items (`"wheel"` → a `REL_WHEEL` delta; `"key"` reserved for a
-later phase).
+It returns `Emit(kind, value)` items: `"wheel"`/`"wheel_hi"` → a `REL_WHEEL` delta, `"key"` → an
+xsetwacom-style key combo. **`keymap.py`** turns that combo into the evdev keycodes the daemon
+taps via `uinput` (by ecode *name*, so it imports no `evdev` and unit-tests without hardware),
+which is how a per-LED-mode ring action like Page Down/Up or Undo works.
 
 ## `ring_daemon.py` — the loop (I/O)
 
 `RingDaemon.run()`:
 
-1. creates a `uinput` device advertising `REL_WHEEL`;
+1. creates a `uinput` device advertising `REL_WHEEL` plus the keys `keymap.py` can emit;
 2. discovers the pad evdev node (name contains *wacom* + *pad*, has `ABS_WHEEL`) and reads its
    true `ABS_WHEEL` maximum to size the translator;
 3. discovers the active-mode sysfs file by glob

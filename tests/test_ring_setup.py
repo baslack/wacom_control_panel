@@ -123,6 +123,14 @@ def test_is_active_queries_systemctl(tmp_path):
     assert s_off.is_active() is False
 
 
+def test_reload_sends_sighup_via_systemctl(tmp_path):
+    calls = []
+    s = _setup(tmp_path, runner=lambda _s: True,
+               systemctl=lambda *a: calls.append(a) or True)
+    assert s.reload() is True
+    assert ("kill", "-s", "HUP", "wacom-control-panel-ring.service") in calls
+
+
 def test_install_reports_failure_when_privileged_step_fails(tmp_path):
     s = _setup(tmp_path, runner=lambda _s: False)
     notes = s.install()

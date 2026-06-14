@@ -170,6 +170,10 @@ class RingSetup:
         """True if the ``systemd --user`` ring service is currently running."""
         return self._systemctl("is-active", "--quiet", RING_SERVICE_NAME)
 
+    def reload(self) -> bool:
+        """SIGHUP the running ring service so it re-reads the saved profile (e.g. after a Save)."""
+        return self._systemctl("kill", "-s", "HUP", RING_SERVICE_NAME)
+
     # ---- side effects -----------------------------------------------------
     def install(self) -> list[str]:
         """Grant permissions + install the user service. Returns human-readable notes."""

@@ -11,6 +11,7 @@ RowLayout {
     property string actKind: "button"
     property string actValue: ""
     property bool keyboardOnly: false
+    property bool ringMode: false   // daemon ring path: offer real scroll + keystrokes
     signal edited(string kind, string value)
 
     spacing: 6
@@ -45,7 +46,21 @@ RowLayout {
         { label: "Modifier hold…", kind: "key", value: "", custom: "modifier" },
         { label: "Disabled", kind: "disabled", value: "" }
     ]
-    readonly property var presets: keyboardOnly ? keyPresets : mousePresets
+    // Ring-daemon path: clockwise/counter-clockwise per LED mode. Real REL_WHEEL scroll is a
+    // first-class "scroll" action here (the daemon emits it), plus the keystroke presets.
+    readonly property var ringPresets: [
+        { label: "Scroll up", kind: "scroll", value: "up" },
+        { label: "Scroll down", kind: "scroll", value: "down" },
+        { label: "Page up", kind: "key", value: "Prior" },
+        { label: "Page down", kind: "key", value: "Next" },
+        { label: "Undo (Ctrl+Z)", kind: "key", value: "ctrl z" },
+        { label: "Redo (Ctrl+Shift+Z)", kind: "key", value: "ctrl shift z" },
+        { label: "Keystroke…", kind: "key", value: "", custom: "key" },
+        { label: "Modifier hold…", kind: "key", value: "", custom: "modifier" },
+        { label: "Disabled", kind: "disabled", value: "" }
+    ]
+    readonly property var presets: ringMode ? ringPresets
+                                            : (keyboardOnly ? keyPresets : mousePresets)
 
     function findCustom(tag) {
         for (var i = 0; i < presets.length; i++)
@@ -74,6 +89,11 @@ RowLayout {
         var i
         if (actKind === "disabled") return Math.max(0, findFixedKind("disabled"))
         if (actKind === "doubleclick") return Math.max(0, findFixedKind("doubleclick"))
+        if (actKind === "scroll") {
+            for (i = 0; i < presets.length; i++)
+                if (presets[i].kind === "scroll" && presets[i].value === actValue) return i
+            return 0
+        }
         if (actKind === "key") {
             if (isModifierAction()) return Math.max(0, findCustom("modifier"))
             for (i = 0; i < presets.length; i++)
