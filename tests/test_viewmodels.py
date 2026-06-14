@@ -73,6 +73,61 @@ def test_canvas_area_override(qapp):
     assert (vm.areaX1, vm.areaY1, vm.areaX2, vm.areaY2) == (100, 200, 300, 400)
 
 
+class _FakeSetup:
+    def __init__(self, *, installed: bool, active: bool) -> None:
+        self._installed = installed
+        self._active = active
+
+    def is_installed(self) -> bool:
+        return self._installed
+
+    def is_active(self) -> bool:
+        return self._active
+
+
+def _pad_vm(monkeypatch, *, evdev_ok: bool, installed: bool, active: bool):
+    from wacom_panel.ui import viewmodels
+
+    monkeypatch.setattr(viewmodels.ring_daemon, "is_available", lambda: evdev_ok)
+    vm = viewmodels.PadVM()
+    vm._ring_setup = _FakeSetup(installed=installed, active=active)
+    vm.refreshRingDaemon()
+    return vm
+
+
+def test_ring_daemon_ready_when_installed_and_active(qapp, monkeypatch):
+    vm = _pad_vm(monkeypatch, evdev_ok=True, installed=True, active=True)
+    assert vm.ringDaemonReady
+    assert vm.ringDaemonStatus == ""
+
+
+def test_ring_daemon_warns_when_evdev_missing(qapp, monkeypatch):
+    vm = _pad_vm(monkeypatch, evdev_ok=False, installed=True, active=True)
+    assert not vm.ringDaemonReady
+    assert "evdev" in vm.ringDaemonStatus
+
+
+def test_ring_daemon_warns_when_not_installed(qapp, monkeypatch):
+    vm = _pad_vm(monkeypatch, evdev_ok=True, installed=False, active=False)
+    assert not vm.ringDaemonReady
+    assert "install-ring-daemon" in vm.ringDaemonStatus
+
+
+def test_ring_daemon_warns_when_installed_but_inactive(qapp, monkeypatch):
+    vm = _pad_vm(monkeypatch, evdev_ok=True, installed=True, active=False)
+    assert not vm.ringDaemonReady
+    assert "not running" in vm.ringDaemonStatus
+
+
+def test_toggling_ring_daemon_rechecks_readiness(qapp, monkeypatch):
+    # Enabling the toggle must re-evaluate readiness (it silences the keystroke fallback).
+    vm = _pad_vm(monkeypatch, evdev_ok=True, installed=False, active=False)
+    seen = []
+    vm.ringDaemonStatusChanged.connect(lambda: seen.append(vm.ringDaemonReady))
+    vm.ringDaemon = True
+    assert seen == [False]  # toggle fired a fresh check, still not ready
+
+
 def test_qml_main_loads(qapp, tmp_path, monkeypatch):
     """Main.qml + components parse and instantiate against a real Controller."""
     from PySide6.QtQml import QQmlApplicationEngine

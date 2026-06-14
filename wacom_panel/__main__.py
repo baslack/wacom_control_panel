@@ -86,6 +86,22 @@ def _cmd_persistence(install: bool) -> int:
     return 0
 
 
+def _cmd_ring_daemon() -> int:
+    from .daemon.ring_daemon import run as run_ring_daemon
+    return run_ring_daemon()
+
+
+def _cmd_ring_setup(install: bool) -> int:
+    from .core.ring_setup import RingSetup
+    setup = RingSetup()
+    notes = setup.install() if install else setup.uninstall()
+    print("Installed ring daemon (permissions + user service)." if install
+          else "Removed ring daemon (permissions + user service).")
+    for note in notes:
+        print(f"  note: {note}")
+    return 0
+
+
 def _quote(token: str) -> str:
     return f'"{token}"' if " " in token else token
 
@@ -111,6 +127,13 @@ def main(argv: list[str] | None = None) -> int:
                         help="install login autostart + systemd --user hotplug watcher")
     parser.add_argument("--uninstall-persistence", action="store_true",
                         help="remove the auto-reapply hooks")
+    parser.add_argument("--ring-daemon", action="store_true",
+                        help="run the touch-ring scroll daemon (evdev -> uinput REL_WHEEL)")
+    parser.add_argument("--install-ring-daemon", action="store_true",
+                        help="grant ring-daemon permissions (udev + input group) and enable its "
+                             "user service")
+    parser.add_argument("--uninstall-ring-daemon", action="store_true",
+                        help="remove the ring daemon's permissions and user service")
     args = parser.parse_args(argv)
 
     if args.list:
@@ -123,6 +146,12 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_persistence(install=True)
     if args.uninstall_persistence:
         return _cmd_persistence(install=False)
+    if args.ring_daemon:
+        return _cmd_ring_daemon()
+    if args.install_ring_daemon:
+        return _cmd_ring_setup(install=True)
+    if args.uninstall_ring_daemon:
+        return _cmd_ring_setup(install=False)
     if args.apply:
         return _cmd_apply(args)
 

@@ -181,8 +181,18 @@ def detect_pad_buttons(tablet: Tablet) -> list[int]:
         return []
 
 
+# Wheel params silenced when the evdev ring daemon owns the ring (so the X driver does not
+# also emit the keystroke fallback — that would double up with the daemon's REL_WHEEL).
+_DEFAULT_RING_PARAMS = ("AbsWheelUp", "AbsWheelDown")
+
+
 def pad_commands(pad: PadConfig, tablet: Tablet) -> list[list[str]]:
-    """ExpressKey + touch-ring mapping (pad device)."""
+    """ExpressKey + touch-ring mapping (pad device).
+
+    Express keys are always bound via xsetwacom. The touch ring is bound to its keystroke
+    fallback *unless* ``pad.ring_daemon`` is set, in which case the ring params are disabled
+    (``"0"``) and the evdev ring daemon drives the ring as real ``REL_WHEEL`` instead.
+    """
     dev = tablet.pad
     if dev is None:
         return []
@@ -191,10 +201,17 @@ def pad_commands(pad: PadConfig, tablet: Tablet) -> list[list[str]]:
         commands.append(
             xsetwacom.build_set_command(dev.name, "Button", num, action.to_xsetwacom())
         )
-    for param, action in sorted(pad.wheels.items()):
-        commands.append(
-            xsetwacom.build_set_command(dev.name, param, action.to_xsetwacom(momentary=True))
-        )
+    if pad.ring_daemon:
+        # Disable every configured wheel param (and the standard pair as a floor), so the
+        # driver stays silent and only the daemon scrolls.
+        params = sorted(set(pad.wheels) | set(_DEFAULT_RING_PARAMS))
+        for param in params:
+            commands.append(xsetwacom.build_set_command(dev.name, param, "0"))
+    else:
+        for param, action in sorted(pad.wheels.items()):
+            commands.append(
+                xsetwacom.build_set_command(dev.name, param, action.to_xsetwacom(momentary=True))
+            )
     return commands
 
 

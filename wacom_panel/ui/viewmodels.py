@@ -28,7 +28,9 @@ from ..core.profile import (
     Profile,
     TouchConfig,
 )
+from ..core.ring_setup import RingSetup
 from ..core.store import ProfileStore
+from ..daemon import ring_daemon
 
 _WHOLE_DESKTOP = "Whole desktop"
 
@@ -388,6 +390,7 @@ class PadVM(QObject):
     """Editable view of :class:`PadConfig`, arranged by the tablet's physical pad layout."""
 
     changed = Signal()
+    ringDaemonStatusChanged = Signal()  # the daemon's readiness changed (toggle / refresh)
 
     # Default touch-ring actions. Pad buttons only emit keystrokes on X (mouse-button /
     # scroll-wheel actions silently fail), so the ring scrolls via arrow keys — one line per
@@ -398,6 +401,9 @@ class PadVM(QObject):
         super().__init__(parent)
         self._cfg = PadConfig()
         self._layout: PadLayout = load_layout("", [])
+        self._ring_setup = RingSetup()
+        self._ring_ready = False
+        self._ring_status = ""
 
     def set_context(self, tablet) -> None:
         numbers = detect_pad_buttons(tablet) if tablet is not None else []
@@ -482,6 +488,59 @@ class PadVM(QObject):
     cwValue = Property(str, lambda self: self._wheel_action("cw").value, notify=changed)
     ccwKind = Property(str, lambda self: self._wheel_action("ccw").kind, notify=changed)
     ccwValue = Property(str, lambda self: self._wheel_action("ccw").value, notify=changed)
+
+    # ---- ring daemon -----------------------------------------------------
+    def _get_ring_daemon(self) -> bool:
+        return self._cfg.ring_daemon
+
+    def _set_ring_daemon(self, value: bool) -> None:
+        if value != self._cfg.ring_daemon:
+            self._cfg.ring_daemon = value
+            self.changed.emit()
+            # Enabling the toggle silences the xsetwacom keystroke fallback, so re-check that the
+            # daemon can actually take over — otherwise the ring would go dead (the footgun).
+            self.refreshRingDaemon()
+
+    # When true the background daemon drives the ring as real REL_WHEEL scroll; when false the
+    # ring falls back to the xsetwacom keystroke mapping (cw/ccw above).
+    ringDaemon = Property(bool, _get_ring_daemon, _set_ring_daemon, notify=changed)
+
+    def _recompute_ring_status(self) -> None:
+        """Decide whether the daemon is ready to drive the ring and, if not, why."""
+        if not ring_daemon.is_available():
+            self._ring_ready = False
+            self._ring_status = (
+                "python-evdev isn’t installed, so the daemon can’t run. The ring won’t scroll "
+                "while this is on — install the ‘daemon’ extra (pip install -e '.[daemon]')."
+            )
+        elif not self._ring_setup.is_installed():
+            self._ring_ready = False
+            self._ring_status = (
+                "The ring daemon isn’t installed yet. The ring won’t scroll while this is on — "
+                "run ‘wacom-panel --install-ring-daemon’, then log out and back in."
+            )
+        elif not self._ring_setup.is_active():
+            self._ring_ready = False
+            self._ring_status = (
+                "The ring daemon is installed but not running, so the ring won’t scroll. Start "
+                "it with ‘systemctl --user start wacom-control-panel-ring.service’."
+            )
+        else:
+            self._ring_ready = True
+            self._ring_status = ""
+
+    @Slot()
+    def refreshRingDaemon(self) -> None:
+        """Re-check daemon readiness (called on page load and whenever the toggle changes)."""
+        self._recompute_ring_status()
+        self.ringDaemonStatusChanged.emit()
+
+    # True when the daemon can actually drive the ring (evdev present, service installed+running).
+    ringDaemonReady = Property(bool, lambda self: self._ring_ready,
+                               notify=ringDaemonStatusChanged)
+    # Empty when ready; otherwise a human-readable reason the ring won't scroll yet.
+    ringDaemonStatus = Property(str, lambda self: self._ring_status,
+                                notify=ringDaemonStatusChanged)
 
     # ---- edits -----------------------------------------------------------
     @Slot(int, str, str)
