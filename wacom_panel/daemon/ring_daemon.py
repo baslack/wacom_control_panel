@@ -20,7 +20,8 @@ import sys
 import time
 from pathlib import Path
 
-from ..core.profile import PadConfig
+from ..core.pad_layout import PadLayout, load_layout
+from ..core.profile import ButtonAction, PadConfig
 from ..core.store import ProfileStore
 from . import keymap
 from .ring_translator import Emit, RingTranslator, ScrollSmoother
@@ -98,6 +99,12 @@ class RingDaemon:
         self._translator = RingTranslator()
         self._smoother = ScrollSmoother()
         self._warned: set[str] = set()
+        # Pad-grab (Increment 3) state.
+        self._layout = PadLayout(display_name="")  # set per bound device
+        self._grabbed = False
+        # While the daemon owns the pad, each held express key remembers the events to emit on
+        # release (so a held button = real click-and-drag / held modifier), keyed by evdev code.
+        self._held: dict[int, list[tuple[int, int, int]]] = {}
 
     # ---- config ----------------------------------------------------------
     def _load_pad(self) -> PadConfig:
@@ -142,6 +149,113 @@ class RingDaemon:
             self._ui.write(ecodes.EV_KEY, ecodes.ecodes[name], 0)
         return True  # caller syns the releases
 
+    # ---- pad grab (Increment 3) -----------------------------------------
+    def _apply_grab(self, dev, want: bool) -> None:
+        """Match the exclusive grab to ``want`` — grabbing diverts the express keys to us."""
+        if want and not self._grabbed:
+            try:
+                dev.grab()
+            except OSError as exc:
+                print(f"ring daemon: could not grab the pad ({exc}); express keys stay on "
+                      "xsetwacom.", file=sys.stderr)
+                return
+            self._grabbed = True
+            print("ring daemon: grabbed the pad — the daemon now drives the express keys.")
+        elif not want and self._grabbed:
+            self._release_all()
+            try:
+                dev.ungrab()
+            except OSError:
+                pass
+            self._grabbed = False
+            print("ring daemon: released the pad — express keys fall back to xsetwacom.")
+
+    def _release_all(self) -> None:
+        """Release any express keys still held (on ungrab / shutdown), so nothing sticks down."""
+        if not self._held:
+            return
+        for events in self._held.values():
+            for etype, code, value in events:
+                self._ui.write(etype, code, value)
+        self._held.clear()
+        self._ui.syn()
+
+    def _on_pad_button(self, code: int, value: int, pad: PadConfig) -> None:
+        """Handle one grabbed express-key event (``value`` 1=down, 0=up, 2=autorepeat)."""
+        if value == 2:  # ignore kernel autorepeat; held semantics come from our own press/release
+            return
+        if value == 0:
+            self._release_button(code)
+            return
+        action = self._action_for(code, pad)
+        if action is not None:
+            self._press_button(code, action)
+
+    def _action_for(self, code: int, pad: PadConfig) -> ButtonAction | None:
+        """The configured action for a raw evdev button code, or ``None`` to inject nothing.
+
+        ``None`` covers: unmapped codes, the centre/mode button (must stay the hardware mode
+        switch), and explicitly disabled buttons.
+        """
+        name = ecodes.BTN.get(code)
+        if isinstance(name, (list, tuple)):
+            name = next((n for n in name if n in self._layout.evdev_buttons), name[0])
+        number = self._layout.evdev_buttons.get(name)
+        if number is None:
+            return None
+        if self._layout.ring is not None and number == self._layout.ring.center:
+            return None  # centre button cycles the LED modes in hardware — never re-inject it
+        action = pad.buttons.get(str(number))
+        if action is None or action.kind == "disabled":
+            return None
+        return action
+
+    def _press_button(self, code: int, action: ButtonAction) -> None:
+        """Inject the down-stroke for an express key and remember what to release on up."""
+        kind = action.kind
+        if kind == "key":
+            presses, releases = keymap.to_chord(action.value)
+            if not presses:
+                return
+            for name in presses:
+                self._ui.write(ecodes.EV_KEY, ecodes.ecodes[name], 1)
+            self._held[code] = [(ecodes.EV_KEY, ecodes.ecodes[name], 0) for name in releases]
+            self._ui.syn()
+        elif kind == "doubleclick":
+            for v in (1, 0, 1, 0):
+                self._ui.write(ecodes.EV_KEY, ecodes.BTN_LEFT, v)
+            self._ui.syn()
+        elif kind in ("button", "scroll"):
+            scroll = self._scroll_delta(action)
+            if scroll is not None:
+                self._ui.write(ecodes.EV_REL, ecodes.REL_WHEEL, scroll)
+                self._ui.syn()
+                return
+            btn = keymap.resolve_button(int(action.value)) if action.value.isdigit() else None
+            if btn is None:
+                return
+            ecode = ecodes.ecodes[btn]
+            self._ui.write(ecodes.EV_KEY, ecode, 1)
+            self._held[code] = [(ecodes.EV_KEY, ecode, 0)]
+            self._ui.syn()
+
+    @staticmethod
+    def _scroll_delta(action: ButtonAction) -> int | None:
+        """REL_WHEEL delta for a scroll-ish action, else ``None`` (it's a real button/key)."""
+        if action.kind == "scroll":
+            return 1 if action.value.strip() == "up" else -1
+        if action.kind == "button" and action.value.isdigit():
+            return keymap.BUTTON_TO_SCROLL.get(int(action.value))
+        return None
+
+    def _release_button(self, code: int) -> None:
+        events = self._held.pop(code, None)
+        if not events:
+            return
+        for etype, ecode, value in events:
+            self._ui.write(etype, ecode, value)
+        self._ui.syn()
+
     # ---- loop ------------------------------------------------------------
     def run(self) -> int:
         if evdev is None:
@@ -159,8 +273,12 @@ class RingDaemon:
                 events={
                     ecodes.EV_REL: [ecodes.REL_WHEEL, ecodes.REL_WHEEL_HI_RES],
                     # Advertise every key the keymap can emit, so per-mode "key" ring actions
-                    # (Page Down/Up, Undo, …) inject as real keystrokes.
-                    ecodes.EV_KEY: [ecodes.ecodes[n] for n in keymap.supported_evdev_names()],
+                    # (Page Down/Up, Undo, …) and grabbed express keys inject as real keystrokes,
+                    # plus the mouse buttons the pad-grab feature injects (left/right/middle/…).
+                    ecodes.EV_KEY: [
+                        ecodes.ecodes[n]
+                        for n in keymap.supported_evdev_names() | keymap.supported_buttons()
+                    ],
                 },
             )
         except OSError as exc:
@@ -178,13 +296,16 @@ class RingDaemon:
                 self._translator = RingTranslator(ring_max=_ring_max(dev))
                 self._smoother.reset()
                 self._reload = True
+                self._grabbed = False  # fresh fd; a prior grab died with the old device
+                self._held.clear()
+                self._layout = load_layout(dev.name, [])
                 print(f"ring daemon: bound to {dev.name}.")
                 try:
                     self._serve(dev, find_led_select())
                 except OSError:
                     print("ring daemon: pad disconnected; waiting to re-acquire.")
                 finally:
-                    dev.close()
+                    dev.close()  # closing the fd releases any EVIOCGRAB automatically
         finally:
             self._ui.close()
         print("ring daemon: stopped.")
@@ -194,28 +315,34 @@ class RingDaemon:
         sel = selectors.DefaultSelector()
         sel.register(dev.fileno(), selectors.EVENT_READ)
         pad = self._load_pad()
-        while not self._stop:
-            if self._reload:
-                pad = self._load_pad()
-                self._reload = False
-            # Drain queued scroll on a fast cadence; idle cheaply when there's nothing pending.
-            timeout = _PAYOUT_S if self._smoother.busy() else _TICK_S
-            if sel.select(timeout=timeout):
-                # Read the LED mode once per batch (it only changes on a centre-button press),
-                # not once per event — a sysfs open/read per wheel tick adds needless latency.
-                mode = read_mode(led) if pad.ring_daemon else 0
-                for event in dev.read():
-                    if event.type != ecodes.EV_ABS or event.code != ecodes.ABS_WHEEL:
-                        continue
-                    if not pad.ring_daemon:
-                        continue  # ring driven by xsetwacom keystrokes; daemon stays out
-                    for emit in self._translator.on_value(event.value, mode):
-                        if emit.kind == "wheel_hi":
-                            self._smoother.add(int(emit.value))
-                        else:
-                            self._inject([emit])  # key actions fire immediately, unsmoothed
-            # Pay out a smoothed slice of any pending scroll.
-            self._inject(self._smoother.tick())
+        self._apply_grab(dev, pad.pad_daemon)
+        try:
+            while not self._stop:
+                if self._reload:
+                    pad = self._load_pad()
+                    self._apply_grab(dev, pad.pad_daemon)  # honour a pad_daemon change on SIGHUP
+                    self._reload = False
+                # Drain queued scroll on a fast cadence; idle cheaply when nothing's pending.
+                timeout = _PAYOUT_S if self._smoother.busy() else _TICK_S
+                if sel.select(timeout=timeout):
+                    # Read the LED mode once per batch (it only changes on a centre-button press),
+                    # not once per event — a sysfs open/read per wheel tick adds needless latency.
+                    mode = read_mode(led) if pad.ring_daemon else 0
+                    for event in dev.read():
+                        if event.type == ecodes.EV_ABS and event.code == ecodes.ABS_WHEEL:
+                            if not pad.ring_daemon:
+                                continue  # ring driven by xsetwacom keystrokes; daemon stays out
+                            for emit in self._translator.on_value(event.value, mode):
+                                if emit.kind == "wheel_hi":
+                                    self._smoother.add(int(emit.value))
+                                else:
+                                    self._inject([emit])  # key actions fire immediately
+                        elif event.type == ecodes.EV_KEY and pad.pad_daemon:
+                            self._on_pad_button(event.code, event.value, pad)
+                # Pay out a smoothed slice of any pending scroll.
+                self._inject(self._smoother.tick())
+        finally:
+            self._apply_grab(dev, False)  # always release the pad when leaving this device
 
 
 def run(store: ProfileStore | None = None) -> int:

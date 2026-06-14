@@ -128,6 +128,18 @@ def test_toggling_ring_daemon_rechecks_readiness(qapp, monkeypatch):
     assert seen == [False]  # toggle fired a fresh check, still not ready
 
 
+def test_toggling_pad_daemon_sets_config_and_rechecks_readiness(qapp, monkeypatch):
+    # Owning the pad grabs it, so the same readiness check must fire (same daemon as the ring).
+    vm = _pad_vm(monkeypatch, evdev_ok=True, installed=False, active=False)
+    seen = []
+    vm.ringDaemonStatusChanged.connect(lambda: seen.append(vm.ringDaemonReady))
+    assert vm.padDaemon is False
+    vm.padDaemon = True
+    assert vm.padDaemon is True
+    assert vm._cfg.pad_daemon is True
+    assert seen == [False]  # toggle fired a fresh readiness check
+
+
 def _pad_vm_with_ring(qapp, modes=4):
     from wacom_panel.core.pad_layout import PadLayout, PadRing
     from wacom_panel.core.profile import PadConfig

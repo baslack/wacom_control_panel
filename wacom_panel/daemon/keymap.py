@@ -53,6 +53,19 @@ KEYSYM_TO_EVDEV: dict[str, str] = {
 # function keys F1-F12
 KEYSYM_TO_EVDEV.update({f"F{n}": f"KEY_F{n}" for n in range(1, 13)})
 
+# xsetwacom mouse-button number -> evdev BTN ecode name, for express keys the daemon injects
+# while it owns the pad. Scroll buttons (4/5) are *not* here — they become REL_WHEEL ticks, not
+# key events (see BUTTON_TO_SCROLL); xsetwacom's 4/5/6/7 are wheel up/down/left/right.
+BUTTON_TO_EVDEV: dict[int, str] = {
+    1: "BTN_LEFT",
+    2: "BTN_MIDDLE",
+    3: "BTN_RIGHT",
+    8: "BTN_SIDE",    # "Back"
+    9: "BTN_EXTRA",   # "Forward"
+}
+# Mouse "buttons" that are really wheel ticks: number -> REL_WHEEL delta (one notch).
+BUTTON_TO_SCROLL: dict[int, int] = {4: 1, 5: -1}
+
 
 def resolve(token: str) -> str | None:
     """Map one combo token (e.g. ``"+ctrl"``, ``"z"``, ``"Prior"``) to an evdev ecode name.
@@ -91,3 +104,13 @@ def supported_evdev_names() -> set[str]:
     names.update(f"KEY_{c}" for c in string.ascii_uppercase)
     names.update(f"KEY_{d}" for d in string.digits)
     return names
+
+
+def resolve_button(number: int) -> str | None:
+    """Map an xsetwacom mouse-button number to an evdev ``BTN_*`` name (``None`` if unmapped)."""
+    return BUTTON_TO_EVDEV.get(int(number))
+
+
+def supported_buttons() -> set[str]:
+    """Every mouse ``BTN_*`` name the pad daemon can emit — for the uinput key capabilities."""
+    return set(BUTTON_TO_EVDEV.values())

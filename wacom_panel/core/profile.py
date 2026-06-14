@@ -125,12 +125,18 @@ class PadConfig:
     ``ring_daemon`` switches the touch ring to the evdev daemon, which emits real ``REL_WHEEL``
     scroll instead of keystrokes. ``ring_modes`` holds the per-LED-mode actions the daemon uses;
     an empty list means "default scroll for every mode" (the daemon fills in defaults).
+
+    ``pad_daemon`` lets the daemon **own the whole pad** (exclusive ``EVIOCGRAB``) so the express
+    keys can inject real mouse buttons / scroll / click-drag — things xsetwacom can't do on X.
+    It is independent of ``ring_daemon`` (the ring can be daemon-driven without grabbing the pad).
+    When off, the xsetwacom express-key bindings drive the buttons as before (the fallback floor).
     """
 
     buttons: dict[str, ButtonAction] = field(default_factory=dict)
     wheels: dict[str, ButtonAction] = field(default_factory=dict)
     ring_daemon: bool = False
     ring_modes: list[RingMode] = field(default_factory=list)
+    pad_daemon: bool = False
 
 
 def _button_action_from(data: object) -> ButtonAction:
@@ -186,6 +192,7 @@ class Profile:
             wheels={k: _button_action_from(v) for k, v in (pad_data.get("wheels") or {}).items()},
             ring_daemon=bool(pad_data.get("ring_daemon", False)),
             ring_modes=[_ring_mode_from(m) for m in (pad_data.get("ring_modes") or [])],
+            pad_daemon=bool(pad_data.get("pad_daemon", False)),
         )
 
         return cls(name=data["name"], mapping=mapping, pen=pen, touch=touch, pad=pad)

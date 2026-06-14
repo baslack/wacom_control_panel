@@ -70,3 +70,26 @@ def test_supported_names_cover_table_letters_and_digits():
     # Every name resolve() can emit must be advertisable.
     for token in ("Down", "ctrl", "F12", "q", "3"):
         assert keymap.resolve(token) in names
+
+
+# ---- mouse buttons: the pad-grab feature -----------------------------------------------------
+
+
+def test_resolve_button_maps_standard_mouse_buttons():
+    assert keymap.resolve_button(1) == "BTN_LEFT"
+    assert keymap.resolve_button(2) == "BTN_MIDDLE"
+    assert keymap.resolve_button(3) == "BTN_RIGHT"
+    assert keymap.resolve_button(8) == "BTN_SIDE"
+    assert keymap.resolve_button(9) == "BTN_EXTRA"
+
+
+def test_resolve_button_unknown_is_none():
+    # Scroll "buttons" 4/5 are wheel ticks, not BTN_* — they resolve via BUTTON_TO_SCROLL.
+    assert keymap.resolve_button(4) is None
+    assert keymap.resolve_button(99) is None
+    assert keymap.BUTTON_TO_SCROLL == {4: 1, 5: -1}
+
+
+def test_supported_buttons_lists_every_mapped_btn():
+    names = keymap.supported_buttons()
+    assert names == {"BTN_LEFT", "BTN_MIDDLE", "BTN_RIGHT", "BTN_SIDE", "BTN_EXTRA"}

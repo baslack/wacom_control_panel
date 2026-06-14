@@ -520,6 +520,22 @@ class PadVM(QObject):
     # ring falls back to the xsetwacom keystroke mapping (cw/ccw above).
     ringDaemon = Property(bool, _get_ring_daemon, _set_ring_daemon, notify=changed)
 
+    def _get_pad_daemon(self) -> bool:
+        return self._cfg.pad_daemon
+
+    def _set_pad_daemon(self, value: bool) -> None:
+        if value != self._cfg.pad_daemon:
+            self._cfg.pad_daemon = value
+            self.changed.emit()
+            # Owning the pad needs the same daemon as the ring — re-check it's actually ready so
+            # the user isn't promised mouse buttons that never arrive.
+            self.refreshRingDaemon()
+
+    # When true the daemon grabs the whole pad so the express keys inject real mouse buttons /
+    # scroll / click-drag; when false the express keys stay on the xsetwacom keystroke floor.
+    # Readiness (evdev + service) is the same service as the ring — reuse ringDaemonReady/Status.
+    padDaemon = Property(bool, _get_pad_daemon, _set_pad_daemon, notify=changed)
+
     def _recompute_ring_status(self) -> None:
         """Decide whether the daemon is ready to drive the ring and, if not, why."""
         if not ring_daemon.is_available():
