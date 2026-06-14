@@ -54,9 +54,27 @@ which is how a per-LED-mode ring action like Page Down/Up or Undo works.
 5. reloads the active profile on **`SIGHUP`**, shuts down cleanly on **`SIGTERM`/`SIGINT`**, and
    **re-acquires** the device if the tablet is unplugged.
 
-It does **not** grab the pad exclusively, so the express keys keep working through `xsetwacom`.
+By default it does **not** grab the pad, so the express keys keep working through `xsetwacom`.
 When the daemon owns the ring, `engine.pad_commands` sets the ring's `AbsWheel*` params to `"0"`
 so the X driver doesn't double up with the daemon's scroll.
+
+### Owning the whole pad (`pad_daemon`)
+
+When the active profile sets **`pad_daemon`**, the daemon **exclusively grabs** the pad
+(`EVIOCGRAB`) so the express keys can finally inject **real mouse buttons / scroll / click-drag**
+— things `xsetwacom` can't do on X (pad buttons emit keystrokes only). While grabbed, X receives
+nothing from the pad, so the `xsetwacom` express-key bindings go silent automatically; they stay
+configured as the **fallback floor**, driving the buttons the moment the grab ends (feature off,
+daemon stopped, or a crash — the kernel releases the grab on fd close). The grab is **verified not
+to break LED mode cycling** (the kernel HID driver updates `status_led0_select` below evdev).
+
+A grabbed `EV_KEY` event is translated raw code → `xsetwacom` number (via the layout's
+`evdev_buttons` map) → the configured `PadConfig.buttons` action, then injected: a **key** action
+holds its chord while the key is held; a **button** action presses/releases the mapped `BTN_*`
+(true click-and-drag); **scroll** (xsetwacom 4/5) emits a `REL_WHEEL` tick; **double-click** taps
+left twice; **disabled / the centre mode button** inject nothing (the centre must remain the
+hardware mode switch). The grab is applied/released live on `SIGHUP`, so toggling `pad_daemon` and
+saving takes effect without a restart.
 
 ## Permissions & lifecycle
 

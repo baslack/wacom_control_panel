@@ -20,5 +20,17 @@
     { "button": 11, "label": "Key 6" },
     { "button": 12, "label": "Key 7" },
     { "button": 13, "label": "Key 8" }
-  ]
+  ],
+  "_evdev_note": "Raw evdev code name -> xsetwacom button number, verified empirically on PTH-660 (grab event15, press each key). The daemon uses this when it owns the pad (EVIOCGRAB) to turn a BTN_* press into the configured action. BTN_0 is the centre/mode button (never injected).",
+  "evdev_buttons": {
+    "BTN_0": 1,
+    "BTN_1": 2,
+    "BTN_2": 3,
+    "BTN_3": 8,
+    "BTN_4": 9,
+    "BTN_5": 10,
+    "BTN_6": 11,
+    "BTN_7": 12,
+    "BTN_8": 13
+  }
 }

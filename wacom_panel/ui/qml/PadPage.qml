@@ -315,23 +315,75 @@ Item {
                 ActionEditor {
                     visible: page.selKind !== ""
                     Layout.fillWidth: true
-                    keyboardOnly: true
+                    // The daemon, when it owns the pad, can inject real mouse buttons — so offer
+                    // the mouse presets only then; otherwise the xsetwacom floor is keys-only.
+                    keyboardOnly: !controller.pad.padDaemon
                     actKind: page.actKind
                     actValue: page.actValue
                     onEdited: function (kind, value) { page.commit(kind, value) }
                 }
 
                 Label {
-                    text: "Pad keys send keystrokes only — mouse-button and scroll-wheel "
-                          + "actions don’t reach apps from the pad on X, so this menu offers keys."
-                          + (controller.pad.ringDaemon ? ""
-                             : " The ring scrolls a line per detent via ↑/↓ "
-                               + "(Page up/down jumps a whole page).")
+                    text: controller.pad.padDaemon
+                          ? "The daemon owns the pad, so express keys can send real mouse "
+                            + "buttons, clicks-and-drags and scroll — pick any action above."
+                          : "Pad keys send keystrokes only — mouse-button and scroll-wheel "
+                            + "actions don’t reach apps from the pad on X, so this menu offers keys."
+                            + (controller.pad.ringDaemon ? ""
+                               : " The ring scrolls a line per detent via ↑/↓ "
+                                 + "(Page up/down jumps a whole page).")
                     color: "#caa05a"
                     font.pixelSize: 12
                     wrapMode: Text.WordWrap
                     Layout.fillWidth: true
                 }
+                // ---- Pad daemon: real mouse buttons on the express keys -------
+                Rectangle {
+                    visible: controller.pad.hasPad
+                    Layout.fillWidth: true
+                    Layout.topMargin: 6
+                    implicitHeight: padDaemonCol.implicitHeight + 20
+                    radius: 6
+                    color: "#26262b"
+                    border.color: "#454550"
+
+                    Component.onCompleted: controller.pad.refreshRingDaemon()
+
+                    ColumnLayout {
+                        id: padDaemonCol
+                        anchors.fill: parent
+                        anchors.margins: 10
+                        spacing: 6
+
+                        CheckBox {
+                            text: "Let the daemon drive the express keys (real mouse buttons)"
+                            checked: controller.pad.padDaemon
+                            onToggled: controller.pad.padDaemon = checked
+                        }
+                        Label {
+                            text: "The daemon grabs the pad so the express keys can inject real "
+                                  + "mouse buttons, double-clicks, click-and-drag and scroll — "
+                                  + "things xsetwacom can’t do on X. The centre button keeps "
+                                  + "cycling LED modes. Uses the same daemon as ring scrolling."
+                            color: "#9aa"
+                            font.pixelSize: 11
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                        }
+                        // Same footgun guard as the ring: enabling this grabs the pad, so warn
+                        // loudly if the daemon isn't actually ready (else the express keys go dead).
+                        Label {
+                            visible: controller.pad.padDaemon && !controller.pad.ringDaemonReady
+                            text: "⚠ " + controller.pad.ringDaemonStatus
+                            color: "#e57373"
+                            font.pixelSize: 11
+                            font.bold: true
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                        }
+                    }
+                }
+
                 Label {
                     visible: controller.pad.hasRing && !controller.pad.ringDaemon
                     text: "The touch ring sends one Clockwise and one Counter-clockwise "

@@ -36,6 +36,10 @@ class PadLayout:
     bottom_keys: list[PadKey] = field(default_factory=list)
     ring: PadRing | None = None
     matched: bool = True  # False for the synthesised generic fallback
+    # evdev ecode name (e.g. "BTN_1") -> xsetwacom button number. Populated only for models whose
+    # raw button codes have been mapped; lets the ring daemon translate a grabbed BTN_* press into
+    # the configured pad action. Empty == the pad-grab feature isn't supported for this model.
+    evdev_buttons: dict[str, int] = field(default_factory=dict)
 
     @property
     def all_buttons(self) -> list[int]:
@@ -100,5 +104,9 @@ def load_layout(tablet_name: str, detected_buttons: list[int]) -> PadLayout:
                 bottom_keys=_keys_from(data.get("bottom_keys"), detected),
                 ring=_ring_from(data.get("ring"), detected),
                 matched=True,
+                evdev_buttons={
+                    str(name): int(num)
+                    for name, num in (data.get("evdev_buttons") or {}).items()
+                },
             )
     return _generic_layout(detected_buttons)

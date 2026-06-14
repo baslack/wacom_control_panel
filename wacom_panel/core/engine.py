@@ -189,9 +189,14 @@ _DEFAULT_RING_PARAMS = ("AbsWheelUp", "AbsWheelDown")
 def pad_commands(pad: PadConfig, tablet: Tablet) -> list[list[str]]:
     """ExpressKey + touch-ring mapping (pad device).
 
-    Express keys are always bound via xsetwacom. The touch ring is bound to its keystroke
-    fallback *unless* ``pad.ring_daemon`` is set, in which case the ring params are disabled
-    (``"0"``) and the evdev ring daemon drives the ring as real ``REL_WHEEL`` instead.
+    Express keys are always bound via xsetwacom — this is the **fallback floor**. When
+    ``pad.pad_daemon`` is set the daemon grabs the pad exclusively (``EVIOCGRAB``), so the X
+    driver receives nothing and these bindings stay silent while the daemon injects real mouse
+    buttons instead; the moment the daemon stops grabbing (disabled / crashed) the same bindings
+    drive the buttons again. We therefore bind them unconditionally and let the grab do the
+    silencing — no ``pad_daemon`` branch here. The touch ring is bound to its keystroke fallback
+    *unless* ``pad.ring_daemon`` is set, in which case the ring params are disabled (``"0"``) and
+    the evdev ring daemon drives the ring as real ``REL_WHEEL`` instead.
     """
     dev = tablet.pad
     if dev is None:

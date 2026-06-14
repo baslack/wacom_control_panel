@@ -184,11 +184,19 @@ def test_pad_ring_daemon_fields_roundtrip(tmp_path):
     assert loaded.pad.ring_modes[1].cw == ButtonAction("key", "Page_Down")
 
 
+def test_pad_daemon_field_roundtrips(tmp_path):
+    p = Profile(name="PadDaemon", pad=PadConfig(pad_daemon=True))
+    path = tmp_path / "p.json"
+    p.save(path)
+    assert Profile.load(path).pad.pad_daemon is True
+
+
 def test_old_profile_without_ring_fields_loads_with_defaults():
-    # A profile saved before the ring daemon existed must load unchanged.
+    # A profile saved before the ring/pad daemon existed must load unchanged.
     loaded = Profile.from_dict({"name": "Legacy", "pad": {"buttons": {}}})
     assert loaded.pad.ring_daemon is False
     assert loaded.pad.ring_modes == []
+    assert loaded.pad.pad_daemon is False
 
 
 def test_profile_commands_combines_all_sections():
