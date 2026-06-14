@@ -14,7 +14,8 @@ core/
 ├── persistence.py      # login autostart + systemd --user unit (pure renderers + side effects)
 ├── watcher.py          # hotplug watcher (pyudev, polling fallback)
 ├── pressure_presets.py # named pressure curves (built-ins + user)
-└── pad_layout.py       # physical pad layout loaded from layouts/*.json
+├── pad_layout.py       # physical pad layout loaded from layouts/*.json (incl. evdev_buttons)
+└── ring_setup.py       # reversible ring/pad-daemon install (udev rule + input group + service)
 ```
 
 ```mermaid
@@ -80,6 +81,9 @@ classDiagram
     class PadConfig {
         +buttons
         +wheels
+        +ring_daemon
+        +ring_modes
+        +pad_daemon
     }
     class ButtonAction {
         +kind
@@ -94,8 +98,17 @@ classDiagram
     PadConfig --> ButtonAction
 ```
 
-`kind` is one of `button` / `doubleclick` / `key` / `disabled`; `buttons` and `wheels` are
-`dict[str, ButtonAction]`.
+`kind` is one of `button` / `doubleclick` / `key` / `scroll` / `disabled`; `buttons` and
+`wheels` are `dict[str, ButtonAction]`. `scroll` is realised by the evdev ring daemon (the ring
+emits `REL_WHEEL`); `to_xsetwacom()` maps it to `"0"` because xsetwacom can't emit wheel events.
+
+`PadConfig` carries three daemon flags:
+- **`ring_daemon`** — switches the touch ring from xsetwacom keystroke fallback to real
+  `REL_WHEEL` scroll (via the evdev daemon).
+- **`ring_modes`** — per-LED-mode ring actions for the daemon; an empty list means "default
+  scroll for every mode".
+- **`pad_daemon`** — daemon grabs the whole pad (`EVIOCGRAB`) so express keys can inject real
+  mouse buttons / scroll / click-drag; the xsetwacom bindings stay as a silent fallback floor.
 
 **`ButtonAction.to_xsetwacom()` is the one place that knows the action-string grammar**, and it
 encodes two hard-won rules:
@@ -153,12 +166,28 @@ in the [top-level README](../../README.md#7-persistence-auto-reapply).
 - **`pressure_presets.py`** — named `[x1,y1,x2,y2]` curves; built-ins (`Soft`/`Linear`/`Firm`)
   can't be deleted; user presets live in `pressure_presets.json`.
 - **`pad_layout.py`** — loads a physical pad layout (which xsetwacom button is which key, plus
-  the ring) from [`../layouts/*.json`](../layouts/README.md), matched to a tablet by name
-  substring, with a generic flat fallback for unknown models. **Note:** these numbers are
-  hardware-measured, not from libwacom — see the [hardware notes](../../README.md#9-hard-won-hardware-notes).
+  the ring and the `evdev_buttons` code→number map) from
+  [`../layouts/*.json`](../layouts/README.md), matched to a tablet by name substring, with a
+  generic flat fallback for unknown models. **Note:** these numbers are hardware-measured, not
+  from libwacom — see the [hardware notes](../../README.md#9-hard-won-hardware-notes).
+
+## `ring_setup.py`
+
+Reversible installer for the ring/pad daemon's permissions + user service — the **only
+root-touching code in the project**:
+- writes a udev rule granting `/dev/uinput` access to the `input` group;
+- adds the user to `input` only if not already a member (records this in a marker file so
+  `uninstall` reverses it only if we added it);
+- writes, enables, and starts a `systemd --user` service that runs `--ring-daemon`.
+
+All `render_*` methods return pure strings (unit-testable without touching the system);
+`install`/`uninstall` do the side effects via an injectable `runner` (default: `pkexec`/`sudo`).
+Also exposes `is_installed()`, `is_active()`, and `reload()` (sends `SIGHUP`) for the GUI's
+readiness check and Save→reload flow.
 
 ## Testing
 
-`tests/test_mapping.py`, `test_phase3.py` (command building + config round-trips),
-`test_store.py`, `test_persistence.py`, `test_pressure_presets.py`, `test_pad_layout.py` — all
-pure, no device required.
+`tests/test_mapping.py`, `test_phase3.py` (command building + config round-trips, including
+`ring_daemon`/`ring_modes`/`pad_daemon` round-trips and back-compat), `test_store.py`,
+`test_persistence.py`, `test_pressure_presets.py`, `test_pad_layout.py`, `test_ring_setup.py`,
+`test_keymap.py`, `test_ring_daemon.py` (evdev-guarded) — all pure, no device required.

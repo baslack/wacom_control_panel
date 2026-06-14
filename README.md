@@ -108,18 +108,24 @@ flowchart TD
         PROF["profile.py<br/>(dataclasses ⇄ JSON)"]
         ENG["engine.py<br/>(config → argv)"]
         MAP["mapping.py<br/>(proportions math)"]
-        STORE["store.py · persistence.py<br/>watcher.py · presets · pad_layout"]
+        STORE["store.py · persistence.py<br/>watcher.py · presets · pad_layout · ring_setup"]
     end
     subgraph BACKEND["backend/ — Qt-free I/O"]
         XS["xsetwacom.py<br/>(subprocess)"]
         DEV["devices.py"]
         DISP["displays.py"]
     end
+    subgraph DAEMON["daemon/ — optional evdev loop"]
+        RD["ring_daemon.py<br/>(evdev read + uinput inject)"]
+        RT["ring_translator.py<br/>(pure math)"]
+        KM["keymap.py<br/>(pure key map)"]
+    end
     CLI["__main__.py<br/>(headless CLI)"]
 
     VM --> ENG
     VM --> STORE
     VM --> PROF
+    VM -.->|"availability check"| RD
     CLI --> ENG
     CLI --> STORE
     ENG --> PROF
@@ -129,18 +135,24 @@ flowchart TD
     STORE --> PROF
     ENG --> DEV
     ENG --> DISP
+    RD --> RT
+    RD --> KM
+    RD --> STORE
 
     classDef ui fill:#2c4a6e,stroke:#5aa0ff,color:#fff
     classDef core fill:#2e4030,stroke:#7ec27e,color:#fff
     classDef back fill:#4a3a2a,stroke:#caa05a,color:#fff
+    classDef daemon fill:#3a2040,stroke:#c07ad0,color:#fff
     class QML,VM ui
     class PROF,ENG,MAP,STORE core
     class XS,DEV,DISP back
+    class RD,RT,KM daemon
 ```
 
-**The rule in one line:** `ui` → `core` → `backend`. Nothing in `core`/`backend` imports
-`PySide6`; the GUI and the headless CLI are just two different front-ends over the same
-`core` functions, which is why `--dry-run` previews exactly what the GUI would apply.
+**The rule in one line:** `ui` → `core` → `backend`; `daemon` sits beside `core` (imports core
+data + evdev; nothing in `core`/`backend` imports `daemon`). The GUI and the headless CLI are
+interchangeable front-ends over the same `core` functions, which is why `--dry-run` previews
+exactly what the GUI would apply.
 
 ---
 
@@ -347,10 +359,12 @@ QT_QPA_PLATFORM=offscreen pytest -q
 
 Things that cost real debugging on an Intuos Pro M (PTH-660) and shaped the design:
 
-- **Pad buttons emit keystrokes only.** A pad express-key or ring mapped to a *mouse button*
-  (incl. scroll 4/5) fires raw events but **no cooked event reaches apps** on X /
-  `xf86-input-wacom`; `key` actions (Shift, arrows, Page keys) work. So the Pad tab offers a
-  **keystroke-only** action menu and the ring scrolls via arrow keys (one line per detent).
+- **Pad buttons emit keystrokes only — on xsetwacom alone.** A pad express-key mapped to a
+  *mouse button* (incl. scroll 4/5) fires raw events but **no cooked event reaches apps** on X /
+  `xf86-input-wacom`; `key` actions (Shift, arrows, Page keys) work fine. The Pad tab's editor
+  therefore offers keystroke actions in its default mode. **With `pad_daemon` on** (see below) the
+  daemon grabs the pad and injects real mouse buttons / scroll / click-drag via uinput, lifting
+  this limitation entirely.
 - **The pad's button numbers must be measured, not assumed.** libwacom's letter order did *not*
   match reality. Verified by pressing each key while watching `xinput test-xi2 <pad-id>`:
   top keys = 2,3,8,9; centre = 1; bottom = 10–13; clockwise = `AbsWheelDown`.
@@ -360,12 +374,18 @@ Things that cost real debugging on an Intuos Pro M (PTH-660) and shaped the desi
   shrinks the tablet cumulatively on every Apply. `engine.tablet_native_area` instead probes
   via `ResetArea`, restores the previous area, and caches the result per process.
 - **Touch-ring "modes" are a proprietary-driver feature.** xsetwacom exposes one `AbsWheelUp`/
-  `Down` pair with no per-mode multiplexing, so the ring's centre is just a normal bindable key.
+  `Down` pair with no per-mode multiplexing, so the ring's centre is just a normal bindable key
+  on the xsetwacom path. The daemon reads the live LED mode from sysfs to give each mode its
+  own action (configured in the Pad tab's per-LED-mode ring editor).
 - **Real ring scrolling needs a daemon.** xsetwacom can't emit `REL_WHEEL`, so the optional
   [`daemon/`](wacom_panel/daemon/README.md) reads the ring's raw `ABS_WHEEL` via evdev and
-  injects `REL_WHEEL` via uinput (below libinput → works on X11 *and* Wayland). It reads the
-  active LED mode from sysfs for future per-mode actions. Enable it with the "real scroll"
-  toggle on the Pad tab + `wacom-panel --install-ring-daemon`.
+  injects `REL_WHEEL` via uinput (below libinput → works on X11 *and* Wayland). Enable with the
+  "Scroll with the background daemon" toggle on the Pad tab + `wacom-panel --install-ring-daemon`.
+- **The daemon can own the whole pad** (`pad_daemon`). `EVIOCGRAB` on the pad node diverts all
+  express-key events to the daemon, which injects real mouse buttons / scroll / click-and-drag
+  via uinput. Verified that the grab does **not** break LED mode cycling (the kernel HID driver
+  updates `status_led0_select` below evdev). The xsetwacom express-key bindings stay as a silent
+  fallback floor — they take over the moment the grab ends.
 
 ---
 
@@ -387,11 +407,12 @@ wacom_panel/
 │   ├── persistence.py    #   login autostart + systemd --user unit (pure renderers)
 │   ├── watcher.py        #   pyudev hotplug watcher (polling fallback)
 │   ├── pressure_presets.py
-│   ├── pad_layout.py     #   physical pad layout from JSON
-│   └── ring_setup.py     #   reversible ring-daemon install (udev + input group + service)
-├── daemon/               # touch-ring scroll daemon — see daemon/README.md
-│   ├── ring_translator.py #  pure: ABS_WHEEL → REL_WHEEL ticks (unit-tested)
-│   └── ring_daemon.py    #   evdev read + uinput inject loop
+│   ├── pad_layout.py     #   physical pad layout from JSON (incl. evdev_buttons map)
+│   └── ring_setup.py     #   reversible ring/pad-daemon install (udev + input group + service)
+├── daemon/               # touch-ring/pad daemon — see daemon/README.md
+│   ├── ring_translator.py #  pure: ABS_WHEEL → scroll/key ticks (unit-tested)
+│   ├── keymap.py         #   pure: xsetwacom key combo → evdev keycodes (unit-tested)
+│   └── ring_daemon.py    #   evdev read + uinput inject loop (ring scroll + pad grab)
 ├── layouts/              # pad-layout JSON — see layouts/README.md
 │   └── intuos-pro-m.json
 └── ui/                   # Qt + QML — see ui/README.md

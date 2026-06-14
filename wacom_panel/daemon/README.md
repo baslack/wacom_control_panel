@@ -10,8 +10,8 @@ Wayland** alike.
 ```
 daemon/
 ├── ring_translator.py   # pure: ABS_WHEEL positions → scroll/key ticks (no evdev, unit-tested)
-├── keymap.py            # pure: xsetwacom key combo → evdev keycodes (no evdev, unit-tested)
-└── ring_daemon.py       # thin evdev/uinput I/O loop around the translator
+├── keymap.py            # pure: xsetwacom key/button combos → evdev codes (no evdev, unit-tested)
+└── ring_daemon.py       # thin evdev/uinput I/O loop (ring scroll + whole-pad grab)
 ```
 
 ## Layering

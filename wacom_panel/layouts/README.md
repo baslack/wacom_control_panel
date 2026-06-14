@@ -35,7 +35,17 @@ truth so the UI can show keys where they physically are.
   },
   "bottom_keys": [                         // express keys below the ring, top → bottom
     { "button": 10, "label": "Key 5" }
-  ]
+  ],
+
+  // Raw evdev code name (e.g. "BTN_1") → xsetwacom button number. Verified by grabbing the
+  // pad node (EVIOCGRAB) and pressing each key. Used by the ring daemon when pad_daemon is on
+  // to translate BTN_* press events into the configured pad action. Omit (or leave empty)
+  // for tablets where the pad-grab feature hasn't been mapped; they fall back to xsetwacom only.
+  "evdev_buttons": {
+    "BTN_0": 1,       // centre / mode-switch button — daemon NEVER re-injects this
+    "BTN_1": 2
+    // ...
+  }
 }
 ```
 
@@ -45,9 +55,15 @@ Field notes:
 - **`cw`/`ccw`** are wheel **parameter names** (`AbsWheelUp` / `AbsWheelDown`). Which physical
   direction is which also varies by hardware and must be observed; on the PTH-660 clockwise is
   `AbsWheelDown`.
-- **`modes`** is informational. `xsetwacom` exposes a single ring action pair with no per-mode
-  multiplexing (the mode LED cycling is a proprietary-driver feature), so the centre key is just
-  a normal bindable button.
+- **`modes`** is informational for the `xsetwacom` path (one `AbsWheelUp`/`Down` pair with no
+  per-mode multiplexing). With `ring_daemon` on, the daemon reads the live LED index from sysfs
+  and the Pad tab's per-LED-mode editor assigns a distinct action per mode; `modes` tells the
+  UI how many LEDs/modes to show.
+- **`evdev_buttons`** is optional. When present it enables `pad_daemon` support: the daemon maps
+  the raw `BTN_*` code to a xsetwacom button number and injects the configured action as a real
+  mouse button / keystroke / scroll via uinput. Populate it by grabbing the pad node and pressing
+  each key (see "Adding a new tablet" below). `BTN_0` is conventionally the centre/mode button
+  and must be present but is **never re-injected** by the daemon.
 - Unknown keys are dropped if device detection reports a subset; an empty detection list trusts
   the file as-is. No matching file → a generic flat key list (`matched = false`).
 
@@ -58,10 +74,17 @@ Field notes:
 2. `xinput test-xi2 <pad-id>` and press each express key (and the ring centre) one at a time,
    noting the `RawButtonPress detail` number for each. Spin the ring each way to learn which
    direction triggers `AbsWheelUp` vs `AbsWheelDown`.
-3. Copy `intuos-pro-m.json`, set `match` to substrings of the device name, and fill in the
-   measured `button` numbers and ring params.
-4. Confirm `pyproject.toml` ships `layouts/*.json` in `package-data` (it does), add a case to
+3. **Optional — `evdev_buttons` for `pad_daemon` support:** find the pad's `/dev/input/eventN`
+   node (it has `ABS_WHEEL`). Run a quick script that grabs the node with `EVIOCGRAB` and logs
+   `EV_KEY` events, then press each express key to record the `BTN_*` code → xsetwacom number
+   mapping. Confirm that grabbing does not interfere with LED mode cycling (verified true on the
+   PTH-660; the kernel HID driver updates `status_led0_select` below evdev).
+4. Copy `intuos-pro-m.json`, set `match` to substrings of the device name, and fill in the
+   measured `button` numbers, ring params, and (if done) `evdev_buttons`.
+5. Confirm `pyproject.toml` ships `layouts/*.json` in `package-data` (it does), add a case to
    `tests/test_pad_layout.py`, and verify in the Pad tab.
 
-> Reminder: on X / `xf86-input-wacom`, pad buttons only deliver **keystrokes** to apps — mouse-
-> button/scroll actions silently fail — so bind keys (the Pad tab's editor enforces this).
+> On X / `xf86-input-wacom` **without the pad daemon**, pad buttons only deliver **keystrokes**
+> to apps — mouse-button/scroll actions silently fail. The Pad tab's editor is keystroke-only by
+> default. With `pad_daemon` enabled (requires `evdev_buttons` in the layout + the ring daemon
+> service), express keys can inject real mouse buttons and scroll via uinput.
