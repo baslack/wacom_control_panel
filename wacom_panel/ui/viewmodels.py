@@ -26,6 +26,7 @@ from ..core.profile import (
     PadConfig,
     PenConfig,
     Profile,
+    RingMode,
     TouchConfig,
 )
 from ..core.ring_setup import RingSetup
@@ -391,6 +392,7 @@ class PadVM(QObject):
 
     changed = Signal()
     ringDaemonStatusChanged = Signal()  # the daemon's readiness changed (toggle / refresh)
+    ringModeChanged = Signal()  # the tablet's live LED mode changed (polled from sysfs)
 
     # Default touch-ring actions. Pad buttons only emit keystrokes on X (mouse-button /
     # scroll-wheel actions silently fail), so the ring scrolls via arrow keys — one line per
@@ -404,6 +406,10 @@ class PadVM(QObject):
         self._ring_setup = RingSetup()
         self._ring_ready = False
         self._ring_status = ""
+        self._active_ring_mode = 0  # the tablet's current LED mode (polled live); the editor
+                                    # always edits this mode — selection follows the hardware.
+        self._led_path = None       # cached sysfs LED-select path (globbed once)
+        self._led_resolved = False
 
     def set_context(self, tablet) -> None:
         numbers = detect_pad_buttons(tablet) if tablet is not None else []
@@ -423,7 +429,16 @@ class PadVM(QObject):
                 param = self._wheel_param(direction)
                 if param and param not in self._cfg.wheels:
                     self._cfg.wheels[param] = self._wheel_action(direction)
+        # Drop trailing all-default ring modes so an untouched profile stays `ring_modes: []`
+        # (the daemon treats a missing/short entry as default scroll anyway).
+        while self._cfg.ring_modes and self._cfg.ring_modes[-1] == RingMode():
+            self._cfg.ring_modes.pop()
         return self._cfg
+
+    def reload_daemon(self) -> None:
+        """Ask the running ring daemon to re-read the saved profile (called after a Save)."""
+        if self._cfg.ring_daemon and self._ring_setup.is_active():
+            self._ring_setup.reload()
 
     # ---- helpers ---------------------------------------------------------
     def _button_action(self, num: int) -> ButtonAction:
@@ -541,6 +556,56 @@ class PadVM(QObject):
     # Empty when ready; otherwise a human-readable reason the ring won't scroll yet.
     ringDaemonStatus = Property(str, lambda self: self._ring_status,
                                 notify=ringDaemonStatusChanged)
+
+    # ---- per-mode ring editor (daemon path) ------------------------------
+    def _ring_mode(self, index: int) -> RingMode:
+        if 0 <= index < len(self._cfg.ring_modes):
+            return self._cfg.ring_modes[index]
+        return RingMode()  # not yet stored -> the daemon's default (scroll down/up)
+
+    def _ensure_ring_mode(self, index: int) -> RingMode:
+        """Grow ``ring_modes`` with default entries up to ``index`` so it can be edited."""
+        while len(self._cfg.ring_modes) <= index:
+            self._cfg.ring_modes.append(RingMode())
+        return self._cfg.ring_modes[index]
+
+    # The editor always edits the tablet's currently-active mode (selection follows the hardware).
+    ringModeCwKind = Property(
+        str, lambda self: self._ring_mode(self._active_ring_mode).cw.kind, notify=changed)
+    ringModeCwValue = Property(
+        str, lambda self: self._ring_mode(self._active_ring_mode).cw.value, notify=changed)
+    ringModeCcwKind = Property(
+        str, lambda self: self._ring_mode(self._active_ring_mode).ccw.kind, notify=changed)
+    ringModeCcwValue = Property(
+        str, lambda self: self._ring_mode(self._active_ring_mode).ccw.value, notify=changed)
+
+    # Friendly name of the mode being edited (= the active one), e.g. "Mode 2".
+    ringModeName = Property(str, lambda self: f"Mode {self._active_ring_mode + 1}",
+                            notify=ringModeChanged)
+
+    @Slot(str, str, str)
+    def setRingMode(self, direction: str, kind: str, value: str) -> None:
+        """Set the active mode's cw/ccw action (daemon ring path)."""
+        if direction not in ("cw", "ccw"):
+            return
+        mode = self._ensure_ring_mode(self._active_ring_mode)
+        setattr(mode, direction, ButtonAction(kind=kind, value=value))
+        self.changed.emit()
+
+    @Slot()
+    def refreshRingMode(self) -> None:
+        """Poll the tablet's live LED mode from sysfs; the editor edits whatever mode is active."""
+        if not self._led_resolved:
+            self._led_path = ring_daemon.find_led_select()
+            self._led_resolved = True
+        mode = ring_daemon.read_mode(self._led_path)
+        if mode != self._active_ring_mode:
+            self._active_ring_mode = mode
+            self.ringModeChanged.emit()
+            self.changed.emit()  # the editor now reflects the newly-active mode's actions
+
+    # The tablet's currently-lit LED mode (0-based); drives the live LED indicators + editor.
+    activeRingMode = Property(int, lambda self: self._active_ring_mode, notify=ringModeChanged)
 
     # ---- edits -----------------------------------------------------------
     @Slot(int, str, str)
@@ -684,6 +749,8 @@ class Controller(QObject):
     def save(self) -> None:
         profile = self._current_profile()
         self._store.save(profile)
+        # The ring daemon reads the saved profile, so nudge it to pick up ring-mode edits now.
+        self._pad.reload_daemon()
         self.statusMessage.emit(f"Saved “{profile.name}”.")
 
     @Slot()

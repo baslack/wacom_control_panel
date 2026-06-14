@@ -128,6 +128,97 @@ def test_toggling_ring_daemon_rechecks_readiness(qapp, monkeypatch):
     assert seen == [False]  # toggle fired a fresh check, still not ready
 
 
+def _pad_vm_with_ring(qapp, modes=4):
+    from wacom_panel.core.pad_layout import PadLayout, PadRing
+    from wacom_panel.core.profile import PadConfig
+    from wacom_panel.ui.viewmodels import PadVM
+
+    vm = PadVM()
+    vm._layout = PadLayout(
+        display_name="Test Pad",
+        ring=PadRing(center=1, center_label="Mode", modes=modes,
+                     cw="AbsWheelUp", ccw="AbsWheelDown"),
+    )
+    vm.load(PadConfig(ring_daemon=True))
+    return vm
+
+
+def test_ring_mode_defaults_to_scroll(qapp):
+    vm = _pad_vm_with_ring(qapp)
+    # An unstored mode reports the daemon default: cw scroll down, ccw scroll up.
+    assert (vm.ringModeCwKind, vm.ringModeCwValue) == ("scroll", "down")
+    assert (vm.ringModeCcwKind, vm.ringModeCcwValue) == ("scroll", "up")
+
+
+def test_set_ring_mode_writes_active_mode(qapp):
+    vm = _pad_vm_with_ring(qapp)
+    vm._active_ring_mode = 1  # the editor edits whatever mode the tablet is on
+    vm.setRingMode("cw", "key", "Next")
+    cfg = vm.to_config()
+    # ring_modes padded to index 1; mode 1's cw is the new key, mode 0 left default.
+    assert len(cfg.ring_modes) == 2
+    assert (cfg.ring_modes[1].cw.kind, cfg.ring_modes[1].cw.value) == ("key", "Next")
+    assert cfg.ring_modes[1].ccw.kind == "scroll"  # untouched default
+
+
+def test_to_config_trims_trailing_default_modes(qapp):
+    vm = _pad_vm_with_ring(qapp)
+    vm._active_ring_mode = 1
+    vm.setRingMode("cw", "scroll", "down")   # same as default -> mode stays all-default
+    vm.setRingMode("ccw", "scroll", "up")
+    assert vm.to_config().ring_modes == []   # both trailing defaults trimmed away
+
+
+def test_ring_mode_name_tracks_active(qapp):
+    vm = _pad_vm_with_ring(qapp)
+    assert vm.ringModeName == "Mode 1"
+    vm._active_ring_mode = 2
+    assert vm.ringModeName == "Mode 3"
+
+
+def test_reload_daemon_signals_only_when_on_and_active(qapp):
+    vm = _pad_vm_with_ring(qapp)
+
+    class _Setup:
+        def __init__(self, active):
+            self._active = active
+            self.reloaded = 0
+
+        def is_active(self):
+            return self._active
+
+        def reload(self):
+            self.reloaded += 1
+
+    vm._ring_setup = _Setup(active=True)
+    vm.reload_daemon()
+    assert vm._ring_setup.reloaded == 1          # ring_daemon on + active -> signalled
+
+    vm._ring_setup = _Setup(active=False)
+    vm.reload_daemon()
+    assert vm._ring_setup.reloaded == 0          # not active -> no signal
+
+
+def test_refresh_ring_mode_follows_tablet(qapp, monkeypatch):
+    from wacom_panel.ui import viewmodels
+
+    vm = _pad_vm_with_ring(qapp, modes=4)
+    monkeypatch.setattr(viewmodels.ring_daemon, "find_led_select", lambda: "/sys/fake")
+    current = {"mode": 2}
+    monkeypatch.setattr(viewmodels.ring_daemon, "read_mode", lambda _p: current["mode"])
+
+    seen = []
+    vm.ringModeChanged.connect(lambda: seen.append(vm.activeRingMode))
+    vm.refreshRingMode()
+    assert vm.activeRingMode == 2
+    assert vm.ringModeName == "Mode 3"   # editor now targets the active mode
+    assert seen == [2]
+
+    # No change -> no further signal.
+    vm.refreshRingMode()
+    assert seen == [2]
+
+
 def test_qml_main_loads(qapp, tmp_path, monkeypatch):
     """Main.qml + components parse and instantiate against a real Controller."""
     from PySide6.QtQml import QQmlApplicationEngine
