@@ -1,6 +1,6 @@
 """Tests for spatial pad layout loading + matching."""
 
-from wacom_panel.core.pad_layout import load_layout
+from wacom_panel.core.pad_layout import load_layout, save_user_layout, user_layout_dir
 
 
 def test_intuos_pro_m_layout_matches_by_name():
@@ -55,3 +55,35 @@ def test_empty_detected_keeps_all_layout_keys():
     assert len(layout.top_keys) == 4
     assert len(layout.bottom_keys) == 4
     assert layout.ring.center == 1
+
+
+# ---- user-local layouts (wizard output) --------------------------------------------------------
+
+
+def test_save_user_layout_roundtrips_and_is_matched(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    data = {
+        "match": ["my tablet"],
+        "display_name": "My Tablet",
+        "top_keys": [{"button": 5, "label": "Key 1"}],
+        "evdev_buttons": {"BTN_0": 5},
+    }
+    path = save_user_layout(data)
+    assert path == user_layout_dir() / "my_tablet.json"
+    layout = load_layout("My Tablet", [])
+    assert layout.matched is True
+    assert layout.display_name == "My Tablet"
+    assert [k.button for k in layout.top_keys] == [5]
+    assert layout.evdev_buttons == {"BTN_0": 5}
+
+
+def test_user_layout_shadows_bundled(tmp_path, monkeypatch):
+    # A user file matching the same tablet name must win over the bundled intuos-pro-m.json.
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    save_user_layout({
+        "match": ["intuos pro m"],
+        "display_name": "Wacom Intuos Pro M",
+        "top_keys": [{"button": 99, "label": "Custom"}],
+    })
+    layout = load_layout("Wacom Intuos Pro M", [])
+    assert [k.button for k in layout.top_keys] == [99]  # user file, not the bundled 2,3,8,9

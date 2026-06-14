@@ -7,9 +7,12 @@ live on the controller itself. All UI logic stays here; ``core`` stays pure.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Property, QObject, Signal, Slot
+import time
+
+from PySide6.QtCore import Property, QObject, QProcess, QSocketNotifier, Signal, Slot
 
 from ..backend import devices, displays, xsetwacom
+from ..core import libwacom_db, pad_capture, tablet_setup
 from ..core.engine import (
     apply_profile,
     detect_pad_buttons,
@@ -17,7 +20,7 @@ from ..core.engine import (
     tablet_native_area,
 )
 from ..core.mapping import ANCHORS, ROTATIONS, Area
-from ..core.pad_layout import PadLayout, load_layout
+from ..core.pad_layout import PadLayout, load_layout, save_user_layout
 from ..core.persistence import Persistence
 from ..core.pressure_presets import PressurePresetStore
 from ..core.profile import (
@@ -636,6 +639,264 @@ class PadVM(QObject):
             self._cfg.wheels[param] = ButtonAction(kind=kind, value=value)
             self.changed.emit()
 
+    def needs_setup(self) -> bool:
+        """True when this tablet has pad buttons but no recognised layout (wizard candidate)."""
+        return bool(self._layout.all_buttons) and not self._layout.matched
+
+
+class TabletSetupVM(QObject):
+    """Drives the first-run setup wizard: capture each pad key, then write a user layout.
+
+    Capture is Qt-native (no threads): a ``QProcess`` runs ``xinput test-xi2 --root`` for the
+    xsetwacom button numbers, and — best-effort, where the evdev node is readable — a
+    ``QSocketNotifier`` on the pad's evdev fd reads the ``BTN_*`` codes for the ``pad_daemon``
+    feature. The two are correlated per physical press (both fire within a few ms).
+    """
+
+    changed = Signal()       # step / counts / instruction changed
+    captured = Signal()      # a key was just captured (drives the flash indicator)
+    finished = Signal()      # a layout was saved; the Controller reloads the pad
+
+    _PAIR_WINDOW_S = 0.25    # evdev code is "the same press" if seen this recently
+
+    def __init__(self, tablet, parent: QObject | None = None) -> None:
+        super().__init__(parent)
+        self._tablet = tablet
+        self._pad = tablet.pad if tablet is not None else None
+        self._spec: libwacom_db.TabletSpec | None = None
+        self._steps: list[str] = []
+        self._step = 0
+        self._above: list[tablet_setup.Capture] = []
+        self._below: list[tablet_setup.Capture] = []
+        self._center: tablet_setup.Capture | None = None
+        self._numbers: list[int] = []
+        # capture plumbing
+        self._proc: QProcess | None = None
+        self._parser: pad_capture.Xi2ButtonParser | None = None
+        self._stdout = ""
+        self._evdev = None
+        self._notifier: QSocketNotifier | None = None
+        self._pending_evdev: tuple[str, float] | None = None
+
+    # ---- lifecycle -------------------------------------------------------
+    @Slot()
+    def start(self) -> None:
+        """Resolve the tablet shape, reset the pad to button-emitting, begin capturing."""
+        if self._pad is None:
+            return
+        self._above, self._below, self._center = [], [], None
+        self._spec = self._resolve_spec()
+        self._steps = self._build_steps()
+        self._step = 0
+        self._numbers = detect_pad_buttons(self._tablet)
+        self._reset_pad_buttons()
+        self._open_capture()
+        self.changed.emit()
+
+    @Slot()
+    def cancel(self) -> None:
+        self._close_capture()
+
+    def _resolve_spec(self) -> libwacom_db.TabletSpec | None:
+        vendor = product = None
+        dev = ring_daemon.find_pad_device() if ring_daemon.is_available() else None
+        if dev is not None:
+            try:
+                vendor, product = dev.info.vendor, dev.info.product
+            finally:
+                dev.close()
+        name = self._pad.name if self._pad else ""
+        return libwacom_db.find_tablet_spec(vendor, product, name=name)
+
+    def _build_steps(self) -> list[str]:
+        if self._spec is not None and self._spec.has_ring:
+            return ["intro", "above", "center", "below", "done"]
+        return ["intro", "all", "done"]
+
+    def _reset_pad_buttons(self) -> None:
+        if self._pad is None:
+            return
+        for cmd in pad_capture.reset_buttons_command(self._pad.name, self._numbers):
+            # cmd = ["xsetwacom", "--set", name, "Button", n, "button", n]
+            xsetwacom.set_param(cmd[2], cmd[3], *cmd[4:], dry=False)
+
+    # ---- capture plumbing ------------------------------------------------
+    def _open_capture(self) -> None:
+        self._parser = pad_capture.Xi2ButtonParser(self._pad.id)
+        self._proc = QProcess(self)
+        self._proc.readyReadStandardOutput.connect(self._on_xinput)
+        argv = pad_capture.xinput_capture_command()
+        self._proc.start(argv[0], argv[1:])
+        self._open_evdev()
+
+    def _open_evdev(self) -> None:
+        if not ring_daemon.is_available():
+            return
+        dev = ring_daemon.find_pad_device()
+        if dev is None:
+            return
+        self._evdev = dev
+        self._notifier = QSocketNotifier(dev.fileno(), QSocketNotifier.Type.Read, self)
+        self._notifier.activated.connect(self._on_evdev)
+
+    def _close_capture(self) -> None:
+        if self._notifier is not None:
+            self._notifier.setEnabled(False)
+            self._notifier = None
+        if self._evdev is not None:
+            try:
+                self._evdev.close()
+            except OSError:
+                pass
+            self._evdev = None
+        if self._proc is not None:
+            self._proc.readyReadStandardOutput.disconnect()
+            self._proc.kill()
+            self._proc.waitForFinished(500)
+            self._proc = None
+        self._parser = None
+
+    def _on_xinput(self) -> None:
+        if self._proc is None or self._parser is None:
+            return
+        self._stdout += bytes(self._proc.readAllStandardOutput()).decode(errors="ignore")
+        lines = self._stdout.split("\n")
+        self._stdout = lines.pop()  # keep the trailing partial line
+        for line in lines:
+            number = self._parser.feed(line)
+            if number is not None:
+                self._record(number)
+
+    def _on_evdev(self) -> None:
+        if self._evdev is None:
+            return
+        from evdev import ecodes
+        try:
+            events = list(self._evdev.read())
+        except (OSError, BlockingIOError):
+            return
+        for event in events:
+            if event.type == ecodes.EV_KEY and event.value == 1:  # key down
+                name = ecodes.BTN.get(event.code)
+                if isinstance(name, (list, tuple)):
+                    name = name[0]
+                if name:
+                    self._pending_evdev = (name, time.monotonic())
+
+    # ---- recording a press ----------------------------------------------
+    def _record(self, xnum: int) -> None:
+        step = self._current_step
+        if step not in ("above", "below", "center", "all"):
+            return  # ignore presses on the intro / done screens
+        evdev_name = None
+        if self._pending_evdev is not None:
+            name, ts = self._pending_evdev
+            if time.monotonic() - ts <= self._PAIR_WINDOW_S:
+                evdev_name = name
+            self._pending_evdev = None
+        cap = tablet_setup.Capture(xnum=xnum, evdev=evdev_name)
+        if step == "center":
+            self._center = cap
+        elif step == "below":
+            self._below.append(cap)
+        else:  # "above" or "all"
+            self._above.append(cap)
+        self.captured.emit()
+        self.changed.emit()
+
+    @Slot()
+    def undoLast(self) -> None:
+        step = self._current_step
+        if step == "center":
+            self._center = None
+        elif step == "below" and self._below:
+            self._below.pop()
+        elif self._above:
+            self._above.pop()
+        self.changed.emit()
+
+    # ---- navigation ------------------------------------------------------
+    @Slot()
+    def nextStep(self) -> None:
+        if self._step < len(self._steps) - 1:
+            self._step += 1
+            self.changed.emit()
+
+    @Slot()
+    def back(self) -> None:
+        if self._step > 0:
+            self._step -= 1
+            self.changed.emit()
+
+    @Slot()
+    def finish(self) -> None:
+        """Assemble + save the layout, then tell the Controller to reload the pad."""
+        spec = self._spec
+        layout = tablet_setup.build_layout(
+            display_name=(spec.name if spec and spec.name else (self._pad.name if self._pad
+                                                                else "My Tablet")),
+            model=spec.model if spec else "",
+            has_ring=bool(spec and spec.has_ring),
+            ring_modes=spec.ring_modes if spec else 1,
+            top=self._above,
+            bottom=self._below,
+            center=self._center,
+        )
+        save_user_layout(layout)
+        self._close_capture()
+        self.finished.emit()
+
+    # ---- exposed state ---------------------------------------------------
+    @property
+    def _current_step(self) -> str:
+        return self._steps[self._step] if self._steps else "intro"
+
+    currentStep = Property(str, lambda self: self._current_step, notify=changed)
+    isFirstStep = Property(bool, lambda self: self._step == 0, notify=changed)
+    isLastStep = Property(bool, lambda self: self._step >= len(self._steps) - 1, notify=changed)
+    hasRing = Property(bool, lambda self: bool(self._spec and self._spec.has_ring), notify=changed)
+    evdevAvailable = Property(bool, lambda self: self._evdev is not None, notify=changed)
+    tabletLabel = Property(
+        str,
+        lambda self: (self._spec.name if self._spec and self._spec.name
+                      else (self._pad.name if self._pad else "your tablet")),
+        notify=changed,
+    )
+    expectedCount = Property(
+        int,
+        lambda self: (self._spec.num_buttons if self._spec else len(self._numbers)),
+        notify=changed,
+    )
+    totalCaptured = Property(
+        int,
+        lambda self: len(self._above) + len(self._below) + (1 if self._center else 0),
+        notify=changed,
+    )
+
+    def _group_count(self) -> int:
+        step = self._current_step
+        if step == "center":
+            return 1 if self._center else 0
+        if step == "below":
+            return len(self._below)
+        return len(self._above)
+
+    groupCount = Property(int, _group_count, notify=changed)
+
+    def _instruction(self) -> str:
+        step = self._current_step
+        if step == "above":
+            return "Press each button ABOVE the touch ring, from the top down."
+        if step == "center":
+            return "Press the button in the CENTRE of the touch ring."
+        if step == "below":
+            return "Press each button BELOW the touch ring, from the top down."
+        if step == "all":
+            return "Press each button on your tablet, from the top down."
+        return ""
+
+    instruction = Property(str, _instruction, notify=changed)
+
 
 class Controller(QObject):
     """Top-level object exposed to QML: profiles, actions, persistence + the mapping VM."""
@@ -643,6 +904,7 @@ class Controller(QObject):
     statusMessage = Signal(str)
     profilesChanged = Signal()
     persistChanged = Signal()
+    setupChanged = Signal()  # the recognised-tablet state changed (wizard finished)
 
     def __init__(self, store: ProfileStore | None = None, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -658,16 +920,36 @@ class Controller(QObject):
         self._touch = TouchVM(self)
         self._pad = PadVM(self)
         self._pad.set_context(self._tablet)
+        self._setup = TabletSetupVM(self._tablet, self)
+        self._setup.finished.connect(self._on_setup_finished)
         self._load_active()
 
     mapping = Property(QObject, lambda self: self._mapping, constant=True)
     pen = Property(QObject, lambda self: self._pen, constant=True)
     touch = Property(QObject, lambda self: self._touch, constant=True)
     pad = Property(QObject, lambda self: self._pad, constant=True)
+    setup = Property(QObject, lambda self: self._setup, constant=True)
     tabletName = Property(
         str, lambda self: self._tablet.name if self._tablet else "(no tablet detected)",
         constant=True,
     )
+    # True when a tablet is connected with pad buttons but no recognised layout — the wizard
+    # auto-opens on this. Flips false once the wizard saves a user layout for the model.
+    needsSetup = Property(
+        bool,
+        lambda self: self._tablet is not None and self._pad.needs_setup(),
+        notify=setupChanged,
+    )
+
+    def _on_setup_finished(self) -> None:
+        """A wizard run saved a layout: re-read it, restore live bindings, drop the prompt."""
+        self._pad.set_context(self._tablet)
+        profile = self._store.active_profile()
+        if profile is not None:
+            self._pad.load(profile.pad)
+            apply_profile(self._current_profile(), self._tablet, self._outputs, dry_run=False)
+        self.setupChanged.emit()
+        self.statusMessage.emit("Tablet set up — your buttons are ready to configure.")
 
     profileNames = Property("QStringList", lambda self: self._store.names(),
                             notify=profilesChanged)

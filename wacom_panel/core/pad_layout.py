@@ -1,17 +1,26 @@
 """Physical pad layouts: which xsetwacom button maps to which key, and the ring.
 
-Layouts are JSON files under ``wacom_panel/layouts/`` so other tablet models can be added
-without code changes. A layout is matched to a tablet by substring against its name. If no
-layout matches, a generic one is synthesised that simply lists every detected button.
+Layouts are JSON files so other tablet models can be added without code changes. They are read
+from two places, **user dir first**: ``~/.config/wacom-control-panel/layouts/`` (written by the
+setup wizard) then the bundled ``wacom_panel/layouts/``. A layout is matched to a tablet by
+substring against its name; if none matches, a generic flat key list is synthesised.
 """
 
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .store import config_dir
+
 _LAYOUT_DIR = Path(__file__).resolve().parent.parent / "layouts"
+
+
+def user_layout_dir() -> Path:
+    """Where the setup wizard writes per-user layouts (searched before the bundled ones)."""
+    return config_dir() / "layouts"
 
 
 @dataclass(frozen=True)
@@ -50,15 +59,31 @@ class PadLayout:
 
 
 def _load_json_layouts() -> list[dict]:
+    """All layout dicts, user dir first so a user file shadows a bundled one of the same name."""
     layouts: list[dict] = []
-    if not _LAYOUT_DIR.is_dir():
-        return layouts
-    for path in sorted(_LAYOUT_DIR.glob("*.json")):
-        try:
-            layouts.append(json.loads(path.read_text()))
-        except (json.JSONDecodeError, OSError):
+    for directory in (user_layout_dir(), _LAYOUT_DIR):  # order = precedence
+        if not directory.is_dir():
             continue
+        for path in sorted(directory.glob("*.json")):
+            try:
+                layouts.append(json.loads(path.read_text()))
+            except (json.JSONDecodeError, OSError):
+                continue
     return layouts
+
+
+def _slugify(name: str) -> str:
+    slug = re.sub(r"[^\w.-]+", "_", (name or "").strip()).strip("_").lower()
+    return slug or "tablet"
+
+
+def save_user_layout(data: dict) -> Path:
+    """Write a wizard-built layout into the user dir; returns the path. Slug from display name."""
+    directory = user_layout_dir()
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{_slugify(data.get('display_name', 'tablet'))}.json"
+    path.write_text(json.dumps(data, indent=2) + "\n")
+    return path
 
 
 def _keys_from(data: list, detected: set[int]) -> list[PadKey]:

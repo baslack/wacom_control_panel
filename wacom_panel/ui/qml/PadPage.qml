@@ -8,6 +8,9 @@ import QtQuick.Layouts
 Item {
     id: page
 
+    // Raised when the user clicks "Set up this tablet" — Main.qml opens the wizard.
+    signal requestSetup()
+
     // Current selection: a "button" (express key / ring centre) or a "wheel" (ring direction).
     property string selKind: ""      // "" | "button" | "wheel"
     property int selButton: -1
@@ -126,13 +129,21 @@ Item {
             text: "No pad / ExpressKeys detected on this tablet."
             color: "#9aa"
         }
-        Label {
+        RowLayout {
             visible: controller.pad.hasPad && !controller.pad.layoutMatched
-            text: "Unknown model — showing a generic flat key list. Add a layout JSON "
-                  + "under wacom_panel/layouts/ to arrange it spatially."
-            color: "#caa05a"
-            wrapMode: Text.WordWrap
             Layout.fillWidth: true
+            spacing: 10
+            Label {
+                text: "This tablet isn’t set up yet, so its buttons are shown as a plain list."
+                color: "#caa05a"
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+            Button {
+                text: "Set up this tablet →"
+                highlighted: true
+                onClicked: page.requestSetup()
+            }
         }
 
         RowLayout {

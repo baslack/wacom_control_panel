@@ -211,6 +211,112 @@ def test_reload_daemon_signals_only_when_on_and_active(qapp):
     assert vm._ring_setup.reloaded == 0          # not active -> no signal
 
 
+# ---- TabletSetupVM (the setup wizard) ----------------------------------------------------------
+
+def _setup_vm(has_ring=True, modes=4):
+    import time
+
+    from wacom_panel.core.libwacom_db import TabletSpec
+    from wacom_panel.ui.viewmodels import TabletSetupVM
+
+    pad = Tablet(name="Wacom Test", devices=[Device("Wacom Test Pad pad", 19, "PAD")])
+    vm = TabletSetupVM(pad)
+    vm._spec = TabletSpec(name="Wacom Test", model="TST-1", num_buttons=9 if has_ring else 4,
+                          has_ring=has_ring, ring_modes=modes)
+    vm._steps = vm._build_steps()
+    return vm, time
+
+
+def _goto(vm, step):
+    while vm.currentStep != step:
+        vm.nextStep()
+
+
+def test_setup_steps_ring_vs_ringless(qapp):
+    ring, _ = _setup_vm(has_ring=True)
+    assert ring._steps == ["intro", "above", "center", "below", "done"]
+    flat, _ = _setup_vm(has_ring=False)
+    assert flat._steps == ["intro", "all", "done"]
+
+
+def test_capture_records_into_the_current_group(qapp):
+    vm, _ = _setup_vm(has_ring=True)
+    _goto(vm, "above")
+    vm._record(2)
+    vm._record(3)
+    assert vm.groupCount == 2
+    _goto(vm, "center")
+    vm._record(1)
+    _goto(vm, "below")
+    vm._record(10)
+    assert vm.totalCaptured == 4  # 2 above + centre + 1 below
+
+
+def test_presses_ignored_outside_capture_steps(qapp):
+    vm, _ = _setup_vm(has_ring=True)
+    vm._record(5)  # still on "intro"
+    assert vm.totalCaptured == 0
+
+
+def test_evdev_pairing_window(qapp):
+    vm, time = _setup_vm(has_ring=False)
+    _goto(vm, "all")
+    vm._pending_evdev = ("BTN_1", time.monotonic())
+    vm._record(2)                                   # recent -> paired
+    vm._pending_evdev = ("BTN_2", time.monotonic() - 10)
+    vm._record(3)                                   # stale -> dropped
+    assert vm._above[0].evdev == "BTN_1"
+    assert vm._above[1].evdev is None
+
+
+def test_undo_last_pops_current_group(qapp):
+    vm, _ = _setup_vm(has_ring=True)
+    _goto(vm, "above")
+    vm._record(2)
+    vm._record(3)
+    vm.undoLast()
+    assert vm.groupCount == 1
+    assert vm._above[0].xnum == 2
+
+
+def test_finish_builds_and_saves_layout(qapp, monkeypatch):
+    from wacom_panel.ui import viewmodels
+
+    saved = {}
+    monkeypatch.setattr(viewmodels, "save_user_layout", lambda data: saved.update(data) or "p")
+
+    vm, _ = _setup_vm(has_ring=True)
+    _goto(vm, "above")
+    vm._pending_evdev = (None, 0)  # no evdev paired
+    vm._record(2)
+    vm._record(3)
+    _goto(vm, "center")
+    vm._record(1)
+    _goto(vm, "below")
+    vm._record(10)
+    _goto(vm, "done")
+    vm.finish()
+
+    assert saved["display_name"] == "Wacom Test"
+    assert [k["button"] for k in saved["top_keys"]] == [2, 3]
+    assert [k["button"] for k in saved["bottom_keys"]] == [10]
+    assert saved["ring"]["center"] == 1
+    assert saved["ring"]["modes"] == 4
+
+
+def test_pad_vm_needs_setup(qapp):
+    from wacom_panel.core.pad_layout import PadKey, PadLayout
+    from wacom_panel.ui.viewmodels import PadVM
+
+    vm = PadVM()
+    vm._layout = PadLayout(display_name="Pad", top_keys=[PadKey(2, "B")], matched=False)
+    assert vm.needs_setup() is True
+    vm._layout = PadLayout(display_name="Known", top_keys=[PadKey(2, "B")], matched=True)
+    assert vm.needs_setup() is False
+    vm._layout = PadLayout(display_name="Empty", matched=False)  # no buttons
+    assert vm.needs_setup() is False
+
+
 def test_refresh_ring_mode_follows_tablet(qapp, monkeypatch):
     from wacom_panel.ui import viewmodels
 
