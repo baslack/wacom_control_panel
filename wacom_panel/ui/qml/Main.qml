@@ -71,7 +71,7 @@ ApplicationWindow {
         currentIndex: tabs.currentIndex
         MappingPage {}
         PenPage {}
-        PadPage {}
+        PadPage { onRequestSetup: setupWizard.open() }
         TouchPage {}
     }
 
@@ -144,4 +144,11 @@ ApplicationWindow {
         Label { text: "Delete “" + controller.activeProfile + "”?" }
         onAccepted: controller.deleteProfile()
     }
+
+    // ---- first-run tablet setup wizard ----------------------------------
+    SetupWizard { id: setupWizard }
+
+    // Auto-open for an unrecognised tablet (the main entry point); the Pad tab also has a
+    // manual "Set up this tablet" button that opens the same dialog.
+    Component.onCompleted: if (controller.needsSetup) setupWizard.open()
 }
