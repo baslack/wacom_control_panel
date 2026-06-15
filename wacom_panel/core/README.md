@@ -15,7 +15,7 @@ core/
 ├── watcher.py          # hotplug watcher (pyudev, polling fallback)
 ├── pressure_presets.py # named pressure curves (built-ins + user)
 ├── pad_layout.py       # physical pad layout loaded from layouts/*.json (incl. evdev_buttons)
-└── ring_setup.py       # reversible ring/pad-daemon install (udev rule + input group + service)
+└── ring_setup.py       # reversible ring/pad-daemon install (per-device uaccess udev + service)
 ```
 
 ```mermaid
@@ -174,11 +174,19 @@ in the [top-level README](../../README.md#7-persistence-auto-reapply).
 ## `ring_setup.py`
 
 Reversible installer for the ring/pad daemon's permissions + user service — the **only
-root-touching code in the project**:
-- writes a udev rule granting `/dev/uinput` access to the `input` group;
-- adds the user to `input` only if not already a member (records this in a marker file so
-  `uninstall` reverses it only if we added it);
-- writes, enables, and starts a `systemd --user` service that runs `--ring-daemon`.
+root-touching code in the project**. Uses **least-privilege `uaccess` udev rules** (logind grants
+the logged-in seat user a per-device ACL, applied immediately — no `input` group, no re-login):
+- `70-wacom-uinput.rules` tags `/dev/uinput` `uaccess` (keeps `GROUP=input` as a non-logind
+  fallback);
+- `70-wacom-pad-uaccess.rules` holds one `uaccess` line **per set-up tablet** (matched by USB id),
+  so access is scoped to exactly the configured devices — never a vendor-wide blanket;
+- after writing rules it `udevadm trigger --action=change`s the devices (an `add` trigger is a
+  no-op for the uaccess builtin on an already-connected device);
+- writes, enables, and starts a `systemd --user` service that runs `--ring-daemon` (plain
+  `ExecStart` — no `sg input` wrapper, since the ACL grants the service by uid).
+
+`grant_pad_access(vendor, product)` adds one tablet's pad rule on demand (the setup wizard's
+"Grant access" button); callers pass USB ids so this module imports no evdev/daemon code.
 
 All `render_*` methods return pure strings (unit-testable without touching the system);
 `install`/`uninstall` do the side effects via an injectable `runner` (default: `pkexec`/`sudo`).

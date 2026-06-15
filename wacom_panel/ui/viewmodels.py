@@ -551,7 +551,7 @@ class PadVM(QObject):
             self._ring_ready = False
             self._ring_status = (
                 "The ring daemon isn’t installed yet. The ring won’t scroll while this is on — "
-                "run ‘wacom-panel --install-ring-daemon’, then log out and back in."
+                "run ‘wacom-panel --install-ring-daemon’ (one password prompt, no logout)."
             )
         elif not self._ring_setup.is_active():
             self._ring_ready = False
@@ -707,6 +707,31 @@ class TabletSetupVM(QObject):
                 dev.close()
         name = self._pad.name if self._pad else ""
         return libwacom_db.find_tablet_spec(vendor, product, name=name)
+
+    def _pad_usb_ids(self) -> tuple[str, str] | None:
+        """This tablet's (vendor, product) as 4-hex strings, for the per-device uaccess rule."""
+        dev = ring_daemon.find_pad_device() if ring_daemon.is_available() else None
+        if dev is None:
+            return None
+        try:
+            return f"{dev.info.vendor:04x}", f"{dev.info.product:04x}"
+        finally:
+            dev.close()
+
+    @Slot()
+    def grantAccess(self) -> None:
+        """One pkexec prompt grants evdev access to THIS tablet, then capture starts live.
+
+        uaccess applies the ACL immediately (no re-login), so re-opening the node here lights up
+        ``BTN_*`` capture in the same wizard run. Best-effort: if anything fails, the wizard still
+        completes with key bindings, just without the pad-daemon mouse-button mapping.
+        """
+        if self._evdev is not None:
+            return  # already readable — nothing to grant
+        ids = self._pad_usb_ids()
+        if ids is not None and RingSetup().grant_pad_access(*ids):
+            self._open_evdev()
+        self.changed.emit()
 
     def _build_steps(self) -> list[str]:
         if self._spec is not None and self._spec.has_ring:

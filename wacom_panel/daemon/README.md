@@ -78,11 +78,13 @@ saving takes effect without a restart.
 
 ## Permissions & lifecycle
 
-Reading the pad node needs the **`input` group**; writing `/dev/uinput` needs access (granted
-on a desktop session by the logind *uaccess* ACL, and by a udev rule otherwise). Both — plus a
-`systemd --user` service that runs `--ring-daemon` — are installed and **fully reverted** by
-`wacom_panel/core/ring_setup.py` (`wacom-panel --install-ring-daemon` /
-`--uninstall-ring-daemon`). This privileged setup is the only non-root-free part of the app.
+Reading the pad node and writing `/dev/uinput` are granted with **least-privilege logind
+*uaccess* ACLs** — per-device udev rules (`TAG+="uaccess"`) hand the logged-in seat user access to
+*only* the set-up tablets and `/dev/uinput`, applied immediately (no `input` group, no re-login).
+These rules — plus a `systemd --user` service that runs `--ring-daemon` — are installed and
+**fully reverted** by `wacom_panel/core/ring_setup.py` (`wacom-panel --install-ring-daemon` /
+`--uninstall-ring-daemon`; the setup wizard's "Grant access" button calls the same code). This
+privileged setup is the only non-root-free part of the app.
 
 `evdev` is the optional **`daemon`** extra; if it's missing, `--ring-daemon` exits with a clear
 message instead of crashing (mirroring the optional `pyudev` path in `core/watcher.py`).
