@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import time
 
-from PySide6.QtCore import Property, QObject, QProcess, QSocketNotifier, Signal, Slot
+from PySide6.QtCore import Property, QObject, QProcess, QSocketNotifier, QTimer, Signal, Slot
 
 from ..backend import devices, displays, xsetwacom
 from ..core import libwacom_db, pad_capture, tablet_setup
@@ -678,6 +678,11 @@ class TabletSetupVM(QObject):
         self._notifier: QSocketNotifier | None = None
         self._pending_evdev: tuple[str, float] | None = None
 
+    def set_tablet(self, tablet) -> None:
+        """Re-target the VM after a hotplug; ``start()`` re-resolves the rest from here."""
+        self._tablet = tablet
+        self._pad = tablet.pad if tablet is not None else None
+
     # ---- lifecycle -------------------------------------------------------
     @Slot()
     def start(self) -> None:
@@ -904,7 +909,8 @@ class Controller(QObject):
     statusMessage = Signal(str)
     profilesChanged = Signal()
     persistChanged = Signal()
-    setupChanged = Signal()  # the recognised-tablet state changed (wizard finished)
+    setupChanged = Signal()  # the recognised-tablet state changed (wizard finished / hotplug)
+    tabletChanged = Signal()  # the connected tablet changed (plugged / unplugged)
 
     def __init__(self, store: ProfileStore | None = None, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -923,6 +929,13 @@ class Controller(QObject):
         self._setup = TabletSetupVM(self._tablet, self)
         self._setup.finished.connect(self._on_setup_finished)
         self._load_active()
+        # Poll for tablets being plugged/unplugged while the window is open. xsetwacom's device
+        # list is the same source we read at startup; diffing it every few seconds needs no
+        # extra dependency (pyudev isn't installed) and stays in step with what the app uses.
+        self._poll = QTimer(self)
+        self._poll.setInterval(3000)
+        self._poll.timeout.connect(self._poll_devices)
+        self._poll.start()
 
     mapping = Property(QObject, lambda self: self._mapping, constant=True)
     pen = Property(QObject, lambda self: self._pen, constant=True)
@@ -931,7 +944,7 @@ class Controller(QObject):
     setup = Property(QObject, lambda self: self._setup, constant=True)
     tabletName = Property(
         str, lambda self: self._tablet.name if self._tablet else "(no tablet detected)",
-        constant=True,
+        notify=tabletChanged,
     )
     # True when a tablet is connected with pad buttons but no recognised layout — the wizard
     # auto-opens on this. Flips false once the wizard saves a user layout for the model.
@@ -950,6 +963,35 @@ class Controller(QObject):
             apply_profile(self._current_profile(), self._tablet, self._outputs, dry_run=False)
         self.setupChanged.emit()
         self.statusMessage.emit("Tablet set up — your buttons are ready to configure.")
+
+    # ---- live hotplug ----------------------------------------------------
+    def _poll_devices(self) -> None:
+        """Re-query tablets; if the connected set changed, refresh context."""
+        tablets = devices.list_tablets() if xsetwacom.is_available() else []
+        if [t.name for t in tablets] == [t.name for t in self._tablets]:
+            return
+        self._on_tablets_changed(tablets)
+
+    def _on_tablets_changed(self, tablets) -> None:
+        """A tablet was plugged/unplugged: re-point the VMs without dropping unsaved edits.
+
+        ``set_context`` only re-renders the layout against the current in-memory config, so the
+        user's in-progress edits survive. ``needsSetup`` is re-evaluated; QML reacts to the
+        ``setupChanged`` signal to offer the setup dialog for an unrecognised tablet.
+        """
+        previous = self._tablet.name if self._tablet else None
+        self._tablets = tablets
+        self._tablet = tablets[0] if tablets else None
+        self._mapping.set_context(self._tablet, self._outputs)
+        self._pad.set_context(self._tablet)
+        self._setup.set_tablet(self._tablet)
+        self.tabletChanged.emit()
+        self.setupChanged.emit()
+        current = self._tablet.name if self._tablet else None
+        if current and current != previous:
+            self.statusMessage.emit(f"Tablet connected: {current}")
+        elif current is None and previous:
+            self.statusMessage.emit("Tablet disconnected.")
 
     profileNames = Property("QStringList", lambda self: self._store.names(),
                             notify=profilesChanged)
