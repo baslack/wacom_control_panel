@@ -41,6 +41,8 @@ def test_pad_rule_is_per_device_uaccess(tmp_path):
     assert 'ATTRS{idVendor}=="056a"' in rule
     assert 'ATTRS{idProduct}=="0315"' in rule
     assert 'TAG+="uaccess"' in rule
+    # Narrowed to the pad interface only — pen/touch nodes of the same tablet are untouched.
+    assert 'ENV{ID_INPUT_TABLET_PAD}=="1"' in rule
     # Exactly one match line — no vendor-wide blanket.
     assert rule.count("SUBSYSTEM==") == 1
 
