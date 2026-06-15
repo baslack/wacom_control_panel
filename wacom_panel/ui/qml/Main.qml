@@ -23,6 +23,12 @@ ApplicationWindow {
     Connections {
         target: controller
         function onStatusMessage(msg) { win.status = msg }
+        // A tablet was (un)plugged or the wizard finished: offer setup for an unrecognised one,
+        // but only when nothing's already in front of the user (don't re-pop mid-decision).
+        function onSetupChanged() {
+            if (controller.needsSetup && !unknownDialog.opened && !setupWizard.opened)
+                unknownDialog.open()
+        }
     }
 
     // ---- profile bar + tabs ---------------------------------------------
@@ -148,7 +154,12 @@ ApplicationWindow {
     // ---- first-run tablet setup wizard ----------------------------------
     SetupWizard { id: setupWizard }
 
-    // Auto-open for an unrecognised tablet (the main entry point); the Pad tab also has a
-    // manual "Set up this tablet" button that opens the same dialog.
-    Component.onCompleted: if (controller.needsSetup) setupWizard.open()
+    // Opt-in prompt for an unrecognised tablet (at launch or hotplugged); opting in opens the
+    // wizard. The Pad tab also has a manual "Set up this tablet" button that opens the wizard.
+    UnknownTabletDialog {
+        id: unknownDialog
+        onSetupRequested: setupWizard.open()
+    }
+
+    Component.onCompleted: if (controller.needsSetup) unknownDialog.open()
 }

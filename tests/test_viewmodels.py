@@ -337,6 +337,81 @@ def test_refresh_ring_mode_follows_tablet(qapp, monkeypatch):
     assert seen == [2]
 
 
+# ---- Controller live hotplug -------------------------------------------------------------------
+
+def _controller(monkeypatch, tmp_path, tablets):
+    from wacom_panel.core.store import ProfileStore
+    from wacom_panel.ui import viewmodels
+
+    monkeypatch.setattr(viewmodels.xsetwacom, "is_available", lambda: True)
+    monkeypatch.setattr(viewmodels.devices, "list_tablets", lambda: list(tablets))
+    return viewmodels.Controller(store=ProfileStore(root=tmp_path))
+
+
+def test_hotplug_connect_updates_name_and_signals(qapp, tmp_path, monkeypatch):
+    c = _controller(monkeypatch, tmp_path, [])
+    assert c.tabletName == "(no tablet detected)"
+
+    seen = {"tablet": 0, "setup": 0, "status": []}
+    c.tabletChanged.connect(lambda: seen.__setitem__("tablet", seen["tablet"] + 1))
+    c.setupChanged.connect(lambda: seen.__setitem__("setup", seen["setup"] + 1))
+    c.statusMessage.connect(seen["status"].append)
+
+    c._on_tablets_changed([TABLET])
+    assert c.tabletName == "Wacom Test"
+    assert seen["tablet"] == 1 and seen["setup"] == 1
+    assert any("connected" in m.lower() for m in seen["status"])
+
+
+def test_hotplug_disconnect_clears_tablet(qapp, tmp_path, monkeypatch):
+    c = _controller(monkeypatch, tmp_path, [TABLET])
+    assert c.tabletName == "Wacom Test"
+
+    status = []
+    c.statusMessage.connect(status.append)
+    c._on_tablets_changed([])
+    assert c._tablet is None
+    assert c.tabletName == "(no tablet detected)"
+    assert any("disconnected" in m.lower() for m in status)
+
+
+def test_hotplug_preserves_inprogress_edits(qapp, tmp_path, monkeypatch):
+    from wacom_panel.core.profile import ButtonAction
+
+    c = _controller(monkeypatch, tmp_path, [TABLET])
+    c._pad._cfg.buttons["2"] = ButtonAction("key", "ctrl z")
+    c._on_tablets_changed([TABLET])  # set_context re-renders the layout but must not touch _cfg
+    assert c._pad._cfg.buttons["2"].value == "ctrl z"
+
+
+def test_poll_devices_noop_when_unchanged(qapp, tmp_path, monkeypatch):
+    from wacom_panel.ui import viewmodels
+
+    c = _controller(monkeypatch, tmp_path, [TABLET])
+    called = []
+    monkeypatch.setattr(c, "_on_tablets_changed", lambda t: called.append(t))
+
+    c._poll_devices()  # list_tablets still returns [TABLET] — no change
+    assert called == []
+
+    monkeypatch.setattr(viewmodels.devices, "list_tablets", lambda: [])
+    c._poll_devices()  # now the set differs
+    assert len(called) == 1
+
+
+def test_setup_vm_set_tablet_retargets(qapp):
+    from wacom_panel.ui.viewmodels import TabletSetupVM
+
+    vm = TabletSetupVM(None)
+    assert vm._tablet is None and vm._pad is None
+    vm.start()  # no-op when there's no pad
+
+    pad = Tablet(name="Wacom Test", devices=[Device("Wacom Test Pad pad", 19, "PAD")])
+    vm.set_tablet(pad)
+    assert vm._tablet is pad
+    assert vm._pad is not None and vm._pad.type == "PAD"
+
+
 def test_qml_main_loads(qapp, tmp_path, monkeypatch):
     """Main.qml + components parse and instantiate against a real Controller."""
     from PySide6.QtQml import QQmlApplicationEngine
