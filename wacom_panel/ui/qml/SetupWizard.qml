@@ -46,12 +46,28 @@ Dialog {
                       + "a moment, and you only have to do it once."
                 wrapMode: Text.WordWrap; Layout.fillWidth: true; color: "#b8b8be"
             }
-            Label {
+            // Real mouse-button capture needs to read the pad's evdev node. When we can't yet,
+            // offer a one-time, per-tablet permission grant (a single password prompt, no logout).
+            ColumnLayout {
                 visible: !wizard.setup.evdevAvailable
-                text: "Tip: real mouse-button actions on the pad need one-time permission "
-                      + "(Install the ring daemon first). Basic key shortcuts work either way."
+                spacing: 6
+                Label {
+                    text: "Want your express keys to act as real mouse buttons? That needs "
+                          + "one-time permission to read this tablet — just this tablet, nothing "
+                          + "else. Basic key shortcuts work without it."
+                    wrapMode: Text.WordWrap; Layout.fillWidth: true
+                    color: "#caa05a"; font.pixelSize: 12
+                }
+                Button {
+                    text: "Grant access to this tablet…"
+                    onClicked: wizard.setup.grantAccess()
+                }
+            }
+            Label {
+                visible: wizard.setup.evdevAvailable
+                text: "✓ Real mouse-button capture enabled for this tablet."
                 wrapMode: Text.WordWrap; Layout.fillWidth: true
-                color: "#caa05a"; font.pixelSize: 12
+                color: "#8bc34a"; font.pixelSize: 12
             }
         }
 

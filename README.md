@@ -408,7 +408,7 @@ wacom_panel/
 │   ├── watcher.py        #   pyudev hotplug watcher (polling fallback)
 │   ├── pressure_presets.py
 │   ├── pad_layout.py     #   physical pad layout from JSON (incl. evdev_buttons map)
-│   └── ring_setup.py     #   reversible ring/pad-daemon install (udev + input group + service)
+│   └── ring_setup.py     #   reversible ring/pad-daemon install (per-device uaccess udev + service)
 ├── daemon/               # touch-ring/pad daemon — see daemon/README.md
 │   ├── ring_translator.py #  pure: ABS_WHEEL → scroll/key ticks (unit-tested)
 │   ├── keymap.py         #   pure: xsetwacom key combo → evdev keycodes (unit-tested)
@@ -447,7 +447,7 @@ python -m wacom_panel [no flags]      launch the GUI
   --install-persistence               install login autostart + systemd --user watcher
   --uninstall-persistence             remove the auto-reapply hooks
   --ring-daemon                       run the touch-ring scroll daemon (evdev → REL_WHEEL)
-  --install-ring-daemon               grant ring-daemon perms (udev + input group) + service
+  --install-ring-daemon               grant ring-daemon perms (per-device uaccess udev) + service
   --uninstall-ring-daemon             remove the ring daemon's perms and service
 ```
 

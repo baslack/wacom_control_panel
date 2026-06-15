@@ -91,10 +91,22 @@ def _cmd_ring_daemon() -> int:
     return run_ring_daemon()
 
 
+def _connected_pad_ids() -> list[tuple[str, str]]:
+    """The connected pad's (vendor, product) hex ids, so install can grant its access too."""
+    from .daemon import ring_daemon
+    dev = ring_daemon.find_pad_device() if ring_daemon.is_available() else None
+    if dev is None:
+        return []
+    try:
+        return [(f"{dev.info.vendor:04x}", f"{dev.info.product:04x}")]
+    finally:
+        dev.close()
+
+
 def _cmd_ring_setup(install: bool) -> int:
     from .core.ring_setup import RingSetup
     setup = RingSetup()
-    notes = setup.install() if install else setup.uninstall()
+    notes = setup.install(_connected_pad_ids()) if install else setup.uninstall()
     print("Installed ring daemon (permissions + user service)." if install
           else "Removed ring daemon (permissions + user service).")
     for note in notes:
@@ -130,8 +142,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--ring-daemon", action="store_true",
                         help="run the touch-ring scroll daemon (evdev -> uinput REL_WHEEL)")
     parser.add_argument("--install-ring-daemon", action="store_true",
-                        help="grant ring-daemon permissions (udev + input group) and enable its "
-                             "user service")
+                        help="grant ring-daemon permissions (per-device uaccess udev rules) and "
+                             "enable its user service")
     parser.add_argument("--uninstall-ring-daemon", action="store_true",
                         help="remove the ring daemon's permissions and user service")
     args = parser.parse_args(argv)

@@ -304,6 +304,45 @@ def test_finish_builds_and_saves_layout(qapp, monkeypatch):
     assert saved["ring"]["modes"] == 4
 
 
+def test_grant_access_reopens_evdev_when_granted(qapp, monkeypatch):
+    from wacom_panel.ui import viewmodels
+
+    vm, _ = _setup_vm(has_ring=True)
+    # Pretend we can resolve this tablet's USB ids and that the grant succeeds.
+    monkeypatch.setattr(vm, "_pad_usb_ids", lambda: ("056a", "0315"))
+    granted = {}
+
+    class _FakeRingSetup:
+        def grant_pad_access(self, vendor, product):
+            granted.update(v=vendor, p=product)
+            return True
+
+    monkeypatch.setattr(viewmodels, "RingSetup", _FakeRingSetup)
+    # After a successful grant, the VM re-opens evdev — fake that opening flips it available.
+    monkeypatch.setattr(vm, "_open_evdev", lambda: setattr(vm, "_evdev", object()))
+
+    assert vm.evdevAvailable is False
+    vm.grantAccess()
+    assert granted == {"v": "056a", "p": "0315"}
+    assert vm.evdevAvailable is True
+
+
+def test_grant_access_noop_when_already_available(qapp, monkeypatch):
+    from wacom_panel.ui import viewmodels
+
+    vm, _ = _setup_vm(has_ring=True)
+    vm._evdev = object()  # already readable
+    called = []
+
+    class _FakeRingSetup:
+        def __init__(self):
+            called.append(1)
+
+    monkeypatch.setattr(viewmodels, "RingSetup", _FakeRingSetup)
+    vm.grantAccess()
+    assert called == []  # never tried to elevate
+
+
 def test_pad_vm_needs_setup(qapp):
     from wacom_panel.core.pad_layout import PadKey, PadLayout
     from wacom_panel.ui.viewmodels import PadVM
